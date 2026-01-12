@@ -125,7 +125,7 @@ function MainContent({ activeModule, currentSession, stepParams, polishParams, c
             body: JSON.stringify({
               session_id: currentSession.id,
               product_name: stepParams.productName,
-              selling_points: sellingPointsArray.join(','), // 后端需要字符串格式
+              selling_points: sellingPointsArray, // 后端需要数组格式
               style: stepParams.style,
               length: stepParams.length
             })
