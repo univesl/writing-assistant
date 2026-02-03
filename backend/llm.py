@@ -29,7 +29,7 @@ class LLMAPIClient:
         )
         self.model_name = LLM_MODEL_NAME
     
-    def chat_completion(self, messages: List[Dict], stream: bool = True, temperature: float = 0.7, max_tokens: int = 300) -> any:
+    def chat_completion(self, messages: List[Dict], stream: bool = True, temperature: float = 0.7, max_tokens: int = 1000) -> any:
         """调用LLM API进行对话
         
         Args:

@@ -3,13 +3,10 @@ import './App.css'
 import TopNav from './components/TopNav'
 import Sidebar from './components/Sidebar'
 import MainContent from './components/MainContent'
-import RightPanel from './components/RightPanel'
 import { sessionApi } from './api/sessionApi'
 import { writeApi } from './api/writeApi'
 
 function App() {
-  // 当前选中的功能模块：quick/write/step/polish
-  const [activeModule, setActiveModule] = useState('quick')
   // 当前选中的会话ID
   const [currentSession, setCurrentSession] = useState(null)
   // 所有会话列表
@@ -20,16 +17,12 @@ function App() {
   
   // 当前会话的输出内容
   const [currentSessionOutput, setCurrentSessionOutput] = useState('')
-  // 步骤式写作参数
-  const [stepParams, setStepParams] = useState({
-    productName: '',
-    sellingPoints: '',
-    style: 'simple',
-    length: 'medium'
-  })
-  // 校对润色参数
-  const [polishParams, setPolishParams] = useState({
-    polishType: 'check'
+  
+  // 左侧栏显示状态
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
+    // 从localStorage恢复侧边栏状态
+    const savedState = localStorage.getItem('isSidebarOpen')
+    return savedState !== null ? savedState === 'true' : true
   })
   
   // 加载会话列表
@@ -117,6 +110,11 @@ function App() {
       loadSessionContent(currentSession.id)
     }
   }, [currentSession])
+  
+  // 保存侧边栏状态到localStorage
+  useEffect(() => {
+    localStorage.setItem('isSidebarOpen', isSidebarOpen)
+  }, [isSidebarOpen])
 
   // 处理新建会话
   const handleNewSession = async () => {
@@ -253,7 +251,7 @@ function App() {
         [sessionId]: [...sessionContentsList, {
           content_id: Date.now(), // 使用时间戳作为临时ID
           content: content,
-          content_type: activeModule,
+          content_type: 'quick',
           created_at: new Date().toLocaleString()
         }]
       }
@@ -263,35 +261,29 @@ function App() {
   return (
     <div className="app-container">
       <TopNav />
-      <div className="main-layout">
+      <div className={`main-layout ${isSidebarOpen ? '' : 'sidebar-closed'}`}>
         <Sidebar 
           sessions={sessions} 
           currentSession={currentSession} 
           onSessionChange={handleSessionChange} 
           onNewSession={handleNewSession} 
           onDeleteSession={handleDeleteSession} 
-          onRenameSession={handleRenameSession} 
+          onRenameSession={handleRenameSession}
+          isOpen={isSidebarOpen}
         />
+        <button 
+          className={`sidebar-toggle-btn ${isSidebarOpen ? '' : 'collapsed'}`}
+          onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+          title={isSidebarOpen ? "隐藏侧边栏" : "显示侧边栏"}
+        >
+          {isSidebarOpen ? '◀' : '▶'}
+        </button>
         {currentSession ? (
-          <>
-            <MainContent 
-              activeModule={activeModule} 
-              currentSession={currentSession}
-              stepParams={stepParams}
-              polishParams={polishParams}
-              currentOutput={currentSessionOutput}
-              onContentUpdate={handleContentUpdate}
-            />
-            <RightPanel 
-              activeModule={activeModule} 
-              onModuleChange={setActiveModule} 
-              stepParams={stepParams}
-              onStepParamsChange={setStepParams}
-              polishParams={polishParams}
-              onPolishParamsChange={setPolishParams}
-              currentSession={currentSession}
-            />
-          </>
+          <MainContent 
+            currentSession={currentSession}
+            currentOutput={currentSessionOutput}
+            onContentUpdate={handleContentUpdate}
+          />
         ) : (
           <div className="empty-session-message">
             请创建会话

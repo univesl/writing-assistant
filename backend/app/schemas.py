@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Literal, List, Optional
+from typing import Literal, Optional
 
 
 class SessionCreateIn(BaseModel):
@@ -16,22 +16,8 @@ class WriteQuickIn(BaseModel):
     model_type: Optional[Literal["general", "creative"]] = "general"
 
 
-class WriteStepIn(BaseModel):
-    session_id: int
-    product_name: str = Field(..., min_length=1)
-    selling_points: List[str] = Field(default_factory=list)
-    style: Literal["simple", "vivid", "formal"] = "simple"
-    length: Literal["short", "medium", "long"] = "medium"
-
-
-class WritePolishIn(BaseModel):
-    session_id: int
-    content: str = Field(..., min_length=1)
-    polish_type: Literal["check", "optimize", "expand"]
-
-
 class WriteSaveIn(BaseModel):
     session_id: int
     content: str = Field(..., min_length=1)
-    content_type: Literal["quick", "step", "polish"]
+    content_type: Literal["quick"]
     original_content: Optional[str] = None

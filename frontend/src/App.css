@@ -50,6 +50,7 @@ body {
   display: flex;
   flex: 1;
   overflow: hidden;
+  position: relative;
 }
 
 /* 空会话提示 */
@@ -73,6 +74,62 @@ body {
   flex-direction: column;
   padding: 16px;
   overflow-y: auto;
+  transition: all 0.3s ease;
+  flex-shrink: 0;
+}
+
+.sidebar.open {
+  width: 200px;
+  opacity: 1;
+}
+
+.sidebar.closed {
+  width: 0;
+  padding: 16px 0;
+  opacity: 0;
+  overflow: hidden;
+  border-right: none;
+}
+
+/* 侧边栏切换按钮 */
+.sidebar-toggle-btn {
+  position: absolute;
+  left: 200px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 48px;
+  background-color: #ffffff;
+  border: 1px solid #e8ecef;
+  border-left: none;
+  border-radius: 0 8px 8px 0;
+  cursor: pointer;
+  font-size: 12px;
+  color: #666;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+  z-index: 10;
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.05);
+}
+
+.sidebar-toggle-btn:hover {
+  background-color: #f5f7fa;
+  color: #1890ff;
+  box-shadow: 2px 0 12px rgba(24, 144, 255, 0.15);
+}
+
+.sidebar-toggle-btn:active {
+  transform: translateY(-50%) scale(0.95);
+}
+
+/* 当侧边栏关闭时，按钮位置调整 */
+.main-layout.sidebar-closed .sidebar-toggle-btn {
+  left: 0;
+  border-left: 1px solid #e8ecef;
+  border-right: none;
+  border-radius: 8px 0 0 8px;
 }
 
 .sidebar .new-session-btn {
@@ -147,6 +204,125 @@ body {
   padding-bottom: 12px;
   border-bottom: 1px solid #e8ecef;
   letter-spacing: -0.3px;
+}
+
+/* 快速写作模板化输入样式 */
+.main-content .template-input {
+  padding: 20px;
+  background-color: #ffffff;
+  border-radius: 12px;
+  border: 1px solid #e8ecef;
+  margin-bottom: 20px;
+}
+
+.main-content .template-prompt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  line-height: 1.5;
+  margin-bottom: 20px;
+}
+
+.main-content .template-prompt select,
+.main-content .template-prompt input {
+  padding: 8px 12px;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  font-size: 16px;
+  transition: all 0.3s ease;
+}
+
+.main-content .template-prompt select:focus,
+.main-content .template-prompt input:focus {
+  outline: none;
+  border-color: #1890ff;
+  box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.2);
+}
+
+.main-content .template-prompt select {
+  min-width: 120px;
+  background-color: #ffffff;
+}
+
+.main-content .template-prompt input {
+  min-width: 180px;
+}
+
+.main-content .template-prompt select[value=""],
+.main-content .template-prompt input[value=""] {
+  color: #bfbfbf;
+}
+
+.main-content .template-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.main-content .add-reference-btn {
+  padding: 8px 16px;
+  border: 1px dashed #d9d9d9;
+  border-radius: 4px;
+  background-color: #fafafa;
+  color: #666;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.main-content .add-reference-btn:hover {
+  border-color: #1890ff;
+  color: #1890ff;
+}
+
+.main-content .function-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.main-content .function-btn {
+  width: 40px;
+  height: 40px;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  background-color: #fafafa;
+  cursor: pointer;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+}
+
+.main-content .function-btn:hover {
+  background-color: #ffffff;
+  border-color: #1890ff;
+  color: #1890ff;
+}
+
+.main-content .start-writing-btn {
+  padding: 8px 24px;
+  border: none;
+  border-radius: 4px;
+  background-color: #1890ff;
+  color: white;
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-weight: 500;
+}
+
+.main-content .start-writing-btn:hover {
+  background-color: #40a9ff;
+}
+
+.main-content .start-writing-btn:disabled {
+  background-color: #d9d9d9;
+  cursor: not-allowed;
 }
 
 .main-content .input-area {
@@ -279,6 +455,332 @@ body {
 
 .main-content .action-btn:disabled {
   background-color: #f5f7fa;
+  border-color: #e8ecef;
+  color: #999;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* Markdown渲染样式 */
+.output-area .md-h1 {
+  font-size: 24px;
+  font-weight: 700;
+  color: #1a1a1a;
+  margin: 24px 0 16px 0;
+  padding-bottom: 8px;
+  border-bottom: 2px solid #e8ecef;
+  line-height: 1.4;
+}
+
+.output-area .md-h2 {
+  font-size: 20px;
+  font-weight: 600;
+  color: #1a1a1a;
+  margin: 20px 0 12px 0;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #f0f2f5;
+  line-height: 1.5;
+}
+
+.output-area .md-h3 {
+  font-size: 18px;
+  font-weight: 600;
+  color: #333;
+  margin: 18px 0 10px 0;
+  line-height: 1.5;
+}
+
+.output-area .md-h4 {
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
+  margin: 16px 0 8px 0;
+  line-height: 1.5;
+}
+
+.output-area .md-h5 {
+  font-size: 15px;
+  font-weight: 600;
+  color: #333;
+  margin: 14px 0 6px 0;
+  line-height: 1.5;
+}
+
+.output-area .md-h6 {
+  font-size: 14px;
+  font-weight: 600;
+  color: #666;
+  margin: 12px 0 6px 0;
+  line-height: 1.5;
+}
+
+.output-area .md-p {
+  margin: 12px 0;
+  line-height: 1.8;
+  color: #333;
+  text-align: justify;
+}
+
+.output-area .md-p:first-child {
+  margin-top: 0;
+}
+
+.output-area .md-p:last-child {
+  margin-bottom: 0;
+}
+
+.output-area .md-ul,
+.output-area .md-ol {
+  margin: 12px 0;
+  padding-left: 24px;
+}
+
+.output-area .md-ul {
+  list-style-type: disc;
+}
+
+.output-area .md-ol {
+  list-style-type: decimal;
+}
+
+.output-area .md-li {
+  margin: 6px 0;
+  line-height: 1.7;
+  color: #333;
+}
+
+.output-area .md-blockquote {
+  margin: 16px 0;
+  padding: 12px 16px;
+  background-color: #f7f9fc;
+  border-left: 4px solid #1890ff;
+  color: #555;
+  font-style: italic;
+  line-height: 1.7;
+}
+
+.output-area .md-code-inline {
+  background-color: #f5f7fa;
+  color: #e74c3c;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.output-area .md-code-block {
+  background-color: #2d2d2d;
+  color: #f8f8f2;
+  padding: 16px;
+  border-radius: 8px;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-x: auto;
+  display: block;
+  width: 100%;
+}
+
+.output-area .md-pre {
+  background-color: #2d2d2d;
+  color: #f8f8f2;
+  padding: 16px;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 16px 0;
+}
+
+.output-area .md-table-wrapper {
+  overflow-x: auto;
+  margin: 16px 0;
+}
+
+.output-area .md-table {
+  width: 100%;
+  border-collapse: collapse;
+  background-color: #ffffff;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.output-area .md-thead {
+  background-color: #f7f9fc;
+  border-bottom: 2px solid #e8ecef;
+}
+
+.output-area .md-tbody {
+  background-color: #ffffff;
+}
+
+.output-area .md-tr {
+  border-bottom: 1px solid #f0f2f5;
+  transition: background-color 0.2s;
+}
+
+.output-area .md-tr:hover {
+  background-color: #f7f9fc;
+}
+
+.output-area .md-th {
+  padding: 12px 16px;
+  text-align: left;
+  font-weight: 600;
+  color: #1a1a1a;
+  border-right: 1px solid #e8ecef;
+}
+
+.output-area .md-th:last-child {
+  border-right: none;
+}
+
+.output-area .md-td {
+  padding: 12px 16px;
+  text-align: left;
+  color: #333;
+  border-right: 1px solid #f0f2f5;
+}
+
+.output-area .md-td:last-child {
+  border-right: none;
+}
+
+.output-area .md-a {
+  color: #1890ff;
+  text-decoration: none;
+  transition: color 0.2s;
+  border-bottom: 1px dotted #1890ff;
+}
+
+.output-area .md-a:hover {
+  color: #40a9ff;
+  border-bottom-style: solid;
+}
+
+.output-area .md-strong {
+  font-weight: 700;
+  color: #1a1a1a;
+}
+
+.output-area .md-em {
+  font-style: italic;
+  color: #555;
+}
+
+.output-area .md-hr {
+  border: none;
+  height: 1px;
+  background: linear-gradient(to right, transparent, #e8ecef, transparent);
+  margin: 24px 0;
+}
+
+/* 参考文档样式 */
+.reference-documents {
+  margin: 16px 0;
+  padding: 16px;
+  background-color: #f7f9fc;
+  border-radius: 8px;
+  border: 1px solid #e8ecef;
+}
+
+.reference-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1a1a1a;
+  margin-bottom: 12px;
+}
+
+.reference-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background-color: #ffffff;
+  border-radius: 6px;
+  margin-bottom: 8px;
+  border: 1px solid #e8ecef;
+  transition: all 0.2s;
+}
+
+.reference-item:hover {
+  border-color: #1890ff;
+  box-shadow: 0 2px 4px rgba(24, 144, 255, 0.1);
+}
+
+.reference-item:last-child {
+  margin-bottom: 0;
+}
+
+.reference-filename {
+  font-size: 13px;
+  color: #333;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reference-remove-btn {
+  width: 24px;
+  height: 24px;
+  border: none;
+  background-color: #ff4d4f;
+  color: white;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  line-height: 1;
+  transition: all 0.2s;
+  margin-left: 8px;
+  flex-shrink: 0;
+}
+
+.reference-remove-btn:hover {
+  background-color: #ff7875;
+  transform: scale(1.1);
+}
+
+.reference-remove-btn:active {
+  transform: scale(0.95);
+}
+
+/* 导出按钮样式 */
+.export-buttons {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.export-btn {
+  min-width: 80px;
+  font-size: 13px;
+  padding: 8px 16px;
+  background: #fff;
+  border: 1px solid #e8ecef;
+  color: #333;
+  transition: all 0.2s;
+}
+
+.export-btn:hover:not(:disabled) {
+  background: #f7f9fc;
+  border-color: #1890ff;
+  color: #1890ff;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(24, 144, 255, 0.15);
+}
+
+.export-btn:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 1px 4px rgba(24, 144, 255, 0.1);
+}
+
+.export-btn:disabled {
+  background: #f5f7fa;
   border-color: #e8ecef;
   color: #999;
   cursor: not-allowed;

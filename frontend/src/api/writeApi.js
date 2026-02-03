@@ -20,30 +20,38 @@ export const writeApi = {
     })
   },
   
-  // 步骤式写作（流式）
-  stepWrite: async (sessionId, productName, sellingPoints, style = 'simple', length = 'medium') => {
-    return apiClient.post('/write/step', {
-      session_id: sessionId,
-      product_name: productName,
-      selling_points: sellingPoints,
-      style: style,
-      length: length
-    })
-  },
-  
-  // 文本润色（流式）
-  polishText: async (sessionId, content, polishType = 'check') => {
-    return apiClient.post('/write/polish', {
-      session_id: sessionId,
-      content: content,
-      polish_type: polishType
-    })
-  },
-  
   // 获取会话历史内容
   getSessionContent: async (sessionId) => {
     const response = await apiClient.get(`/content/get/${sessionId}`)
     return response || []
+  },
+  
+  // 上传参考文档
+  uploadReference: async (file) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return apiClient.post('/content/upload', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    })
+  },
+  
+  // 导出文档
+  exportDocument: async (sessionId, exportType = 'md', referenceDoc = null) => {
+    let url = `/content/export/${sessionId}?export_type=${exportType}`
+    if (referenceDoc) {
+      url += `&reference_doc=${encodeURIComponent(referenceDoc)}`
+    }
+    const response = await apiClient.get(url, {
+      responseType: 'blob'
+    })
+    return response
+  },
+  
+  // 清空会话内容
+  clearSessionContent: async (sessionId) => {
+    return apiClient.delete(`/content/clear/${sessionId}`)
   }
 }
 
@@ -66,36 +74,6 @@ export const writeMock = {
     return {
       content_id: Date.now()
     }
-  },
-  
-  // 步骤式写作
-  stepWrite: async (sessionId, productName, sellingPoints, style = 'simple', length = 'medium') => {
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        resolve({
-          content: `产品：${productName}\n卖点：${sellingPoints}\n风格：${style}\n长度：${length}\n\n这是根据您提供的信息生成的文案内容，采用了${style}风格，长度为${length}。`,
-          finish: true
-        })
-      }, 2000)
-    })
-  },
-  
-  // 文本润色
-  polishText: async (sessionId, content, polishType = 'check') => {
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        const polishResults = {
-          check: `校对结果：${content}\n\n发现0个语法错误，0个拼写错误。`,
-          optimize: `优化结果：${content}\n\n优化了句子结构，使表达更加流畅自然。`,
-          expand: `扩写结果：${content}\n\n根据原文内容进行了扩展，增加了更多细节和例子。`
-        }
-        
-        resolve({
-          original_content: content,
-          polished_content: polishResults[polishType] || content
-        })
-      }, 1000)
-    })
   },
   
   // 获取会话历史内容

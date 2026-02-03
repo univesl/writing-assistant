@@ -28,6 +28,10 @@ apiClient.interceptors.response.use(
     if (contentType && contentType.includes('text/event-stream')) {
       return response
     }
+    // 对于文件下载响应(responseType为blob)，直接返回response对象
+    if (response.config.responseType === 'blob') {
+      return response.data
+    }
     // 根据接口规范处理普通响应数据
     const res = response.data
     if (res.code === 200) {
