@@ -68,7 +68,8 @@ def clear_session_content(session_id: int, db: OrmSession = Depends(get_db)):
 async def upload_reference_document(file: UploadFile = File(...)):
     """
     上传参考文档，支持.docx和.md文件
-    .docx文件会使用pandoc转换为markdown
+    .docx文件会保存到format文件夹中作为模板
+    .md文件会转换为.docx后保存到format文件夹中
     """
     try:
         # 检查文件类型
@@ -77,67 +78,112 @@ async def upload_reference_document(file: UploadFile = File(...)):
         if file_extension not in ['.docx', '.md']:
             return err(400, "不支持的文件类型，请上传.docx或.md文件")
         
-        # 创建临时文件
-        with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as temp_file:
-            # 保存上传的文件
-            content = await file.read()
-            temp_file.write(content)
-            temp_file_path = temp_file.name
+        # 使用相对路径获取format文件夹
+        format_dir = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'format')
+        format_dir = os.path.abspath(format_dir)
         
-        # 如果是.docx文件，转换为markdown
+        # 如果format文件夹不存在，自动创建
+        if not os.path.exists(format_dir):
+            os.makedirs(format_dir)
+            print(f"[DEBUG] 已自动创建format文件夹: {format_dir}")
+        
+        # 如果是.docx文件，直接保存到format文件夹
         if file_extension == '.docx':
             try:
-                # 使用pandoc转换.docx为markdown
-                output_md_path = temp_file_path.replace('.docx', '.md')
+                # 保存到format文件夹
+                docx_path = os.path.join(format_dir, file.filename)
+                with open(docx_path, 'wb') as f:
+                    content = await file.read()
+                    f.write(content)
+                
+                print(f"[DEBUG] 模板文件已保存: {docx_path}")
+                
+                # 读取markdown内容用于预览
+                temp_file_path = None
+                try:
+                    # 创建临时文件用于转换
+                    with tempfile.NamedTemporaryFile(delete=False, suffix='.docx') as temp_file:
+                        temp_file.write(content)
+                        temp_file_path = temp_file.name
+                    
+                    # 使用pandoc转换.docx为markdown
+                    output_md_path = temp_file_path.replace('.docx', '.md')
+                    result = subprocess.run(
+                        ['pandoc', '-f', 'docx', '-t', 'markdown', '-o', output_md_path, temp_file_path],
+                        capture_output=True,
+                        text=True,
+                        timeout=30
+                    )
+                    
+                    if result.returncode == 0:
+                        # 读取转换后的markdown内容
+                        with open(output_md_path, 'r', encoding='utf-8') as f:
+                            markdown_content = f.read()
+                    else:
+                        markdown_content = ""
+                    
+                    # 清理临时文件
+                    if temp_file_path and os.path.exists(temp_file_path):
+                        os.unlink(temp_file_path)
+                    if os.path.exists(output_md_path):
+                        os.unlink(output_md_path)
+                    
+                except Exception as e:
+                    print(f"[DEBUG] 转换预览内容失败: {str(e)}")
+                    markdown_content = ""
+                
+                return ok({
+                    "filename": file.filename,
+                    "content": markdown_content,
+                    "type": "docx"
+                }, "模板上传成功")
+                
+            except Exception as e:
+                print(f"[DEBUG] 保存docx文件出错: {str(e)}")
+                return err(500, f"模板保存失败: {str(e)}")
+        
+        # 如果是.md文件，转换为.docx后保存到format文件夹
+        elif file_extension == '.md':
+            try:
+                # 读取markdown内容
+                content = await file.read()
+                markdown_content = content.decode('utf-8')
+                
+                # 创建临时markdown文件
+                with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.md', encoding='utf-8') as temp_file:
+                    temp_file.write(markdown_content)
+                    temp_file_path = temp_file.name
+                
+                # 转换为.docx文件名
+                docx_filename = Path(file.filename).stem + '.docx'
+                docx_path = os.path.join(format_dir, docx_filename)
+                
+                # 使用pandoc转换.md为.docx
                 result = subprocess.run(
-                    ['pandoc', '-f', 'docx', '-t', 'markdown', '-o', output_md_path, temp_file_path],
+                    ['pandoc', '-f', 'markdown', '-t', 'docx', '-o', docx_path, temp_file_path],
                     capture_output=True,
                     text=True,
                     timeout=30
                 )
                 
+                # 清理临时文件
+                os.unlink(temp_file_path)
+                
                 if result.returncode != 0:
                     print(f"[DEBUG] Pandoc转换失败: {result.stderr}")
                     return err(500, f"文档转换失败: {result.stderr}")
                 
-                # 读取转换后的markdown内容
-                with open(output_md_path, 'r', encoding='utf-8') as f:
-                    markdown_content = f.read()
-                
-                # 清理临时文件
-                os.unlink(temp_file_path)
-                os.unlink(output_md_path)
+                print(f"[DEBUG] 模板文件已保存: {docx_path}")
                 
                 return ok({
-                    "filename": file.filename,
+                    "filename": docx_filename,
                     "content": markdown_content,
-                    "type": "markdown"
-                }, "文档上传并转换成功")
-                
-            except subprocess.TimeoutExpired:
-                return err(500, "文档转换超时")
-            except Exception as e:
-                print(f"[DEBUG] 转换过程中出错: {str(e)}")
-                return err(500, f"文档转换失败: {str(e)}")
-        
-        # 如果是.md文件，直接读取内容
-        elif file_extension == '.md':
-            try:
-                with open(temp_file_path, 'r', encoding='utf-8') as f:
-                    markdown_content = f.read()
-                
-                # 清理临时文件
-                os.unlink(temp_file_path)
-                
-                return ok({
-                    "filename": file.filename,
-                    "content": markdown_content,
-                    "type": "markdown"
-                }, "文档上传成功")
+                    "type": "docx"
+                }, "模板上传并转换成功")
                 
             except Exception as e:
-                print(f"[DEBUG] 读取markdown文件出错: {str(e)}")
-                return err(500, f"文档读取失败: {str(e)}")
+                print(f"[DEBUG] 转换md文件出错: {str(e)}")
+                return err(500, f"模板转换失败: {str(e)}")
         
     except Exception as e:
         print(f"[DEBUG] 文件上传过程中出错: {str(e)}")
@@ -207,52 +253,6 @@ def export_document(session_id: int, export_type: str = "md", reference_doc: str
         
         elif export_type == "docx":
             # 导出为docx文件
-            # 如果有参考文档，直接将内容写入参考文档中
-            if reference_doc:
-                # 获取项目根目录（从当前文件向上查找）
-                current_dir = os.path.dirname(os.path.abspath(__file__))
-                # 向上查找项目根目录（找到format目录）
-                while current_dir and not os.path.exists(os.path.join(current_dir, 'format')):
-                    current_dir = os.path.dirname(current_dir)
-                    if current_dir == os.path.dirname(current_dir):  # 到达根目录
-                        break
-                
-                if current_dir:
-                    reference_path = os.path.join(current_dir, 'format', reference_doc)
-                    if os.path.exists(reference_path):
-                        # 使用python-docx库修改参考文档
-                        try:
-                            from docx import Document
-                            
-                            # 打开参考文档
-                            doc = Document(reference_path)
-                            
-                            # 清空文档内容
-                            for paragraph in doc.paragraphs:
-                                paragraph.text = ""
-                            
-                            # 添加新内容
-                            doc.add_paragraph(cleaned_content)
-                            
-                            # 保存到临时文件
-                            temp_docx_path = temp_md_path.replace('.md', '.docx')
-                            doc.save(temp_docx_path)
-                            
-                            print(f"[DEBUG] 使用参考文档并写入内容: {reference_path}")
-                            
-                            filename = f"{s.session_name}_{timestamp}.docx"
-                            
-                            return FileResponse(
-                                path=temp_docx_path,
-                                media_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                                filename=filename
-                            )
-                        except ImportError:
-                            print(f"[DEBUG] python-docx库未安装，使用pandoc转换")
-                        except Exception as e:
-                            print(f"[DEBUG] 使用python-docx失败: {str(e)}")
-            
-            # 如果没有参考文档或python-docx不可用，使用pandoc转换
             # 先创建临时markdown文件
             temp_md_file = tempfile.NamedTemporaryFile(
                 mode='w',
@@ -266,8 +266,25 @@ def export_document(session_id: int, export_type: str = "md", reference_doc: str
             
             # 使用pandoc转换为docx
             temp_docx_path = temp_md_path.replace('.md', '.docx')
+            
+            # 构建pandoc命令
+            pandoc_cmd = ['pandoc', '-f', 'markdown', '-t', 'docx', '-o', temp_docx_path, temp_md_path]
+            
+            # 如果有参考文档，使用它作为模板
+            if reference_doc:
+                # 使用相对路径获取format文件夹
+                format_dir = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'format')
+                format_dir = os.path.abspath(format_dir)
+                
+                reference_path = os.path.join(format_dir, reference_doc)
+                if os.path.exists(reference_path):
+                    pandoc_cmd = ['pandoc', '--reference-doc', reference_path, '-f', 'markdown', '-t', 'docx', '-o', temp_docx_path, temp_md_path]
+                    print(f"[DEBUG] 使用参考文档作为模板: {reference_path}")
+                else:
+                    print(f"[DEBUG] 参考文档不存在: {reference_path}")
+            
             result = subprocess.run(
-                ['pandoc', '-f', 'markdown', '-t', 'docx', '-o', temp_docx_path, temp_md_path],
+                pandoc_cmd,
                 capture_output=True,
                 text=True,
                 timeout=30
