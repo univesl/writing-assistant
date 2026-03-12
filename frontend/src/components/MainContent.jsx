@@ -7,12 +7,19 @@ function MainContent({ currentSession, currentOutput, onContentUpdate }) {
   const [outputText, setOutputText] = useState(currentOutput || '')
   const [isGenerating, setIsGenerating] = useState(false)
   
+  // 写作模式：'quick' 或 'speech'
+  const [writingMode, setWritingMode] = useState('quick')
+  
   // 快速写作的模板化参数
   const [textType, setTextType] = useState('')
   const [articleTitle, setArticleTitle] = useState('')
   const [articleLength, setArticleLength] = useState('')
   const [articleStyle, setArticleStyle] = useState('')
   const [otherRequirements, setOtherRequirements] = useState('')
+  
+  // 讲话稿写作的参数
+  const [speakerName, setSpeakerName] = useState('')
+  const [speechRequirements, setSpeechRequirements] = useState('')
   
   // 参考文档相关状态
   const [referenceDocuments, setReferenceDocuments] = useState([])
@@ -26,13 +33,18 @@ function MainContent({ currentSession, currentOutput, onContentUpdate }) {
   const handleGenerate = async () => {
     if (!currentSession) return
     
-    // 快速写作模式下检查必要参数
-    if (!textType) return
-    
-    // 检查文章标题是否填写
-    if (!articleTitle || articleTitle.trim() === '') {
-      alert('请填写文章标题')
-      return
+    if (writingMode === 'quick') {
+      if (!textType) return
+      
+      if (!articleTitle || articleTitle.trim() === '') {
+        alert('请填写文章标题')
+        return
+      }
+    } else if (writingMode === 'speech') {
+      if (!speechRequirements || speechRequirements.trim() === '') {
+        alert('请填写讲话要求')
+        return
+      }
     }
     
     console.log('用户点击生成按钮')
@@ -42,14 +54,20 @@ function MainContent({ currentSession, currentOutput, onContentUpdate }) {
     setOutputText('生成中...')
     
     try {
-      // 构建快速写作的提示词
-      let prompt = `帮我写一篇${textType}`
-      if (articleTitle) prompt += `，文章标题是${articleTitle}`
-      if (articleLength) prompt += `，文章篇幅${articleLength}字左右`
-      if (articleStyle) prompt += `，风格${articleStyle}`
-      if (otherRequirements) prompt += `，其他要求${otherRequirements}`
+      let prompt = ''
       
-      // 如果有参考文档，添加到提示词中
+      if (writingMode === 'quick') {
+        prompt = `帮我写一篇${textType}`
+        if (articleTitle) prompt += `，文章标题是${articleTitle}`
+        if (articleLength) prompt += `，文章篇幅${articleLength}字左右`
+        if (articleStyle) prompt += `，风格${articleStyle}`
+        if (otherRequirements) prompt += `，其他要求${otherRequirements}`
+      } else if (writingMode === 'speech') {
+        prompt = `帮我写一份讲话稿`
+        if (speakerName) prompt += `，演讲者是${speakerName}`
+        prompt += `，讲话要求：${speechRequirements}`
+      }
+      
       if (referenceDocuments.length > 0) {
         prompt += `\n\n参考文档内容：\n`
         referenceDocuments.forEach((doc, index) => {
@@ -63,7 +81,7 @@ function MainContent({ currentSession, currentOutput, onContentUpdate }) {
       console.log('构建的提示词:', prompt)
       
       // 直接使用fetch API测试SSE响应
-      const url = 'http://127.0.0.1:8000/api/write/quick'
+      const url = 'http://127.0.0.1:7501/api/write/quick'
       const response = await fetch(url, {
         method: 'POST',
         headers: {
@@ -250,8 +268,12 @@ function MainContent({ currentSession, currentOutput, onContentUpdate }) {
       return
     }
     
-    // 检查是否有文章标题
-    if (!articleTitle || articleTitle.trim() === '') {
+    let exportTitle = articleTitle
+    if (writingMode === 'speech') {
+      exportTitle = speakerName || '讲话稿'
+    }
+    
+    if (!exportTitle || exportTitle.trim() === '') {
       alert('请填写文章标题')
       return
     }
@@ -279,7 +301,7 @@ function MainContent({ currentSession, currentOutput, onContentUpdate }) {
       // 生成文件名，使用文章标题
       const timestamp = new Date().toISOString().slice(0, 10).replace(/-/g, '')
       const extension = exportType === 'docx' ? 'docx' : 'md'
-      link.download = `${articleTitle.trim()}_${timestamp}.${extension}`
+      link.download = `${exportTitle.trim()}_${timestamp}.${extension}`
       
       // 触发下载
       document.body.appendChild(link)
@@ -303,6 +325,23 @@ function MainContent({ currentSession, currentOutput, onContentUpdate }) {
 
   return (
     <div className="main-content">
+      <div className="writing-mode-tabs">
+        <div 
+          className={`mode-tab ${writingMode === 'quick' ? 'active' : ''}`}
+          onClick={() => setWritingMode('quick')}
+        >
+          快速写作
+        </div>
+        <div 
+          className={`mode-tab ${writingMode === 'speech' ? 'active' : ''}`}
+          onClick={() => setWritingMode('speech')}
+        >
+          讲话稿写作
+        </div>
+      </div>
+      
+      {writingMode === 'quick' ? (
+        <>
       <div className="module-title">
         快速写作
       </div>
@@ -404,6 +443,59 @@ function MainContent({ currentSession, currentOutput, onContentUpdate }) {
           </div>
         </div>
       </div>
+      </>
+      ) : (
+        <>
+      <div className="module-title">
+        讲话稿写作
+      </div>
+      
+      <div className="input-area template-input">
+        <div className="template-prompt">
+          演讲者名称：
+          <select
+            value={speakerName}
+            onChange={(e) => setSpeakerName(e.target.value)}
+            disabled={isGenerating}
+            className="speaker-name-select"
+          >
+            <option value="">请选择（可选）</option>
+            <option value="鲁迅">鲁迅</option>
+            <option value="任正非">任正非</option>
+          </select>
+          ，讲话要求：
+          <textarea
+            value={speechRequirements}
+            onChange={(e) => setSpeechRequirements(e.target.value)}
+            disabled={isGenerating}
+            className="speech-requirements-textarea"
+            placeholder="请输入讲话要求（必填）"
+            rows={4}
+          />
+        </div>
+        
+        <div className="template-controls">
+          <button className="add-reference-btn" onClick={handleAddReferenceClick}>+模板选择</button>
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileChange}
+            accept=".docx,.md"
+            style={{ display: 'none' }}
+          />
+          <div className="function-buttons">
+            <button
+              className="start-writing-btn"
+              onClick={handleGenerate}
+              disabled={isGenerating || !speechRequirements}
+            >
+              {isGenerating ? '生成中...' : '开始写作'}
+            </button>
+          </div>
+        </div>
+      </div>
+        </>
+      )}
       
       {/* 显示已上传的参考文档 */}
       {referenceDocuments.length > 0 && (

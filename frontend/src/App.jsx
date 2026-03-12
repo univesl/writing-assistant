@@ -271,13 +271,6 @@ function App() {
           onRenameSession={handleRenameSession}
           isOpen={isSidebarOpen}
         />
-        <button 
-          className={`sidebar-toggle-btn ${isSidebarOpen ? '' : 'collapsed'}`}
-          onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-          title={isSidebarOpen ? "隐藏侧边栏" : "显示侧边栏"}
-        >
-          {isSidebarOpen ? '◀' : '▶'}
-        </button>
         {currentSession ? (
           <MainContent 
             currentSession={currentSession}

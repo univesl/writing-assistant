@@ -2,7 +2,9 @@ from datetime import datetime
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
+import os
 
 from .database import Base, engine
 from .routers import session as session_router
@@ -25,6 +27,22 @@ app.add_middleware(
 app.include_router(session_router.router, prefix="/api")
 app.include_router(write_router.router, prefix="/api")
 app.include_router(content_router.router, prefix="/api")
+
+# 静态文件服务配置
+DIST_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "frontend", "dist")
+if os.path.exists(DIST_DIR):
+    app.mount("/static", StaticFiles(directory=os.path.join(DIST_DIR, "assets")), name="static")
+    
+    @app.get("/")
+    def serve_index():
+        return FileResponse(os.path.join(DIST_DIR, "index.html"))
+    
+    @app.get("/{path:path}")
+    def serve_spa(path: str):
+        file_path = os.path.join(DIST_DIR, path)
+        if os.path.exists(file_path) and os.path.isfile(file_path):
+            return FileResponse(file_path)
+        return FileResponse(os.path.join(DIST_DIR, "index.html"))
 
 
 @app.get("/api/health")
