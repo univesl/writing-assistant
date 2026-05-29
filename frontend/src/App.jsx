@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import './App.css'
 import TopNav from './components/TopNav'
 import Sidebar from './components/Sidebar'
 import MainContent from './components/MainContent'
+import EditorSidebar from './components/EditorSidebar'
 import { sessionApi } from './api/sessionApi'
 import { writeApi } from './api/writeApi'
 
@@ -15,8 +16,21 @@ function App() {
   // 存储每个会话的内容，键为会话ID
   const [sessionContents, setSessionContents] = useState({})
   
-  // 当前会话的输出内容
+  // 当前会话的输出内容（文章主体）
   const [currentSessionOutput, setCurrentSessionOutput] = useState('')
+  
+  // 编辑器中的实时内容（用于确保AI使用最新的编辑器内容）
+  const [editorRealtimeContent, setEditorRealtimeContent] = useState('')
+  
+  // 当前会话的对话历史
+  const [currentChatHistory, setCurrentChatHistory] = useState([])
+  
+  // 当前会话的引用列表
+  const [currentQuotes, setCurrentQuotes] = useState([])
+  
+  // 用于跟踪组件是否已挂载，避免竞态条件
+  const isMountedRef = useRef(true)
+  const isLoadingRef = useRef(false)
   
   // 左侧栏显示状态
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
@@ -27,8 +41,23 @@ function App() {
   
   // 加载会话列表
   const loadSessions = async () => {
+    // 防止重复调用
+    if (isLoadingRef.current) {
+      console.log('loadSessions already in progress, skipping')
+      return
+    }
+    isLoadingRef.current = true
+    
     try {
       const response = await sessionApi.getSessions()
+      console.log('loadSessions response:', response)
+      
+      // 检查组件是否仍然挂载
+      if (!isMountedRef.current) {
+        console.log('Component unmounted, skipping state update')
+        return
+      }
+      
       if (response && Array.isArray(response)) {
         const sessionList = response.map(session => ({
           id: session.session_id,
@@ -36,23 +65,25 @@ function App() {
           updatedAt: new Date(session.created_at).toLocaleString()
         }))
         setSessions(sessionList)
+        console.log('sessionList:', sessionList)
         
         // 获取localStorage中保存的当前会话ID
         const savedSessionId = localStorage.getItem('currentSessionId')
+        console.log('savedSessionId:', savedSessionId)
         
         if (sessionList.length > 0) {
           if (savedSessionId) {
             // 查找与保存的ID匹配的会话
             const savedSession = sessionList.find(session => session.id === parseInt(savedSessionId))
             if (savedSession) {
+              console.log('Setting currentSession to savedSession:', savedSession)
               setCurrentSession(savedSession)
               return
             }
           }
           // 如果没有保存的会话ID或找不到匹配的会话，默认选中第一个
-          if (!currentSession) {
-            setCurrentSession(sessionList[0])
-          }
+          console.log('Setting currentSession to first session:', sessionList[0])
+          setCurrentSession(sessionList[0])
         }
         // 如果没有会话，清空当前会话
         else if (sessionList.length === 0) {
@@ -61,53 +92,57 @@ function App() {
       }
     } catch (error) {
       console.error('加载会话列表失败:', error)
-      // 如果加载失败，保持当前状态不变
+    } finally {
+      isLoadingRef.current = false
     }
   }
   
   // 加载会话内容
   const loadSessionContent = async (sessionId) => {
+    console.log('loadSessionContent called with sessionId:', sessionId)
     try {
-      const contents = await writeApi.getSessionContent(sessionId)
-      if (contents && contents.length > 0) {
-        // 取最新的内容作为当前输出
-        const latestContent = contents[contents.length - 1]
-        setCurrentSessionOutput(latestContent.content)
-        
-        // 更新会话内容存储
-        setSessionContents(prev => ({
-          ...prev,
-          [sessionId]: contents
-        }))
+      console.log('Calling getArticle API with sessionId:', sessionId)
+      const articleResponse = await writeApi.getArticle(sessionId)
+      console.log('getArticle response:', articleResponse)
+      if (articleResponse && articleResponse.article_content) {
+        setCurrentSessionOutput(articleResponse.article_content)
       } else {
-        // 如果没有内容，清空当前输出
         setCurrentSessionOutput('')
-        setSessionContents(prev => ({
-          ...prev,
-          [sessionId]: []
-        }))
+      }
+      
+      console.log('Calling getSessionContent API with sessionId:', sessionId)
+      const chatResponse = await writeApi.getSessionContent(sessionId)
+      console.log('getSessionContent response:', chatResponse)
+      if (chatResponse && chatResponse.length > 0) {
+        setCurrentChatHistory(chatResponse.map(item => ({
+          role: item.role,
+          content: item.content
+        })))
+      } else {
+        setCurrentChatHistory([])
       }
     } catch (error) {
       console.error('加载会话内容失败:', error)
-      // 如果加载失败，使用本地存储的内容（如果有）
-      const storedContent = sessionContents[sessionId]
-      if (storedContent && storedContent.length > 0) {
-        setCurrentSessionOutput(storedContent[storedContent.length - 1].content)
-      } else {
-        setCurrentSessionOutput('')
-      }
+      setCurrentSessionOutput('')
+      setCurrentChatHistory([])
     }
   }
   
   // 组件挂载时加载会话列表
   useEffect(() => {
+    isMountedRef.current = true
     loadSessions()
+    return () => {
+      isMountedRef.current = false
+    }
   }, [])
   
   // 当前会话变化时加载会话内容
   useEffect(() => {
     if (currentSession && currentSession.id) {
+      console.log('Current session changed, loading content for session:', currentSession.id)
       loadSessionContent(currentSession.id)
+      setCurrentQuotes([])
     }
   }, [currentSession])
   
@@ -232,30 +267,53 @@ function App() {
   // 处理会话切换
   const handleSessionChange = (session) => {
     setCurrentSession(session)
-    // 保存当前会话ID到localStorage
     localStorage.setItem('currentSessionId', session.id)
   }
   
-  // 处理内容更新
-  const handleContentUpdate = (sessionId, content) => {
-    // 更新当前会话的输出内容
-    if (sessionId === currentSession.id) {
+  // 处理文章内容更新
+  const handleArticleUpdate = async (sessionId, content) => {
+    if (sessionId === currentSession?.id) {
       setCurrentSessionOutput(content)
-    }
-    
-    // 更新会话内容存储
-    setSessionContents(prev => {
-      const sessionContentsList = prev[sessionId] || []
-      return {
-        ...prev,
-        [sessionId]: [...sessionContentsList, {
-          content_id: Date.now(), // 使用时间戳作为临时ID
-          content: content,
-          content_type: 'quick',
-          created_at: new Date().toLocaleString()
-        }]
+      try {
+        await writeApi.saveArticle(sessionId, content)
+        console.log('文章内容已保存到后端')
+      } catch (error) {
+        console.error('保存文章内容失败:', error)
       }
-    })
+    }
+  }
+  
+  // 处理对话历史更新
+  const handleChatHistoryUpdate = (sessionId, chatHistory) => {
+    if (sessionId === currentSession.id) {
+      setCurrentChatHistory(chatHistory)
+    }
+  }
+  
+  // 处理添加引用
+  const handleAddQuote = (text, matchResult) => {
+    const newQuote = {
+      id: Date.now(),
+      text: text,
+      preview: text.length > 30 ? text.substring(0, 30) + '...' : text,
+      match: matchResult
+    }
+    setCurrentQuotes(prev => [...prev, newQuote])
+  }
+  
+  // 处理删除引用
+  const handleRemoveQuote = (quoteId) => {
+    setCurrentQuotes(prev => prev.filter(q => q.id !== quoteId))
+  }
+  
+  // 处理清空引用
+  const handleClearQuotes = () => {
+    setCurrentQuotes([])
+  }
+  
+  // 处理编辑器内容实时变化
+  const handleEditorContentChange = (content) => {
+    setEditorRealtimeContent(content)
   }
 
   return (
@@ -272,11 +330,26 @@ function App() {
           isOpen={isSidebarOpen}
         />
         {currentSession ? (
-          <MainContent 
-            currentSession={currentSession}
-            currentOutput={currentSessionOutput}
-            onContentUpdate={handleContentUpdate}
-          />
+          <>
+            <EditorSidebar 
+              currentSession={currentSession}
+              currentOutput={currentSessionOutput}
+              onArticleUpdate={handleArticleUpdate}
+              onAddQuote={handleAddQuote}
+              onEditorContentChange={handleEditorContentChange}
+            />
+            <MainContent 
+              currentSession={currentSession}
+              currentOutput={currentSessionOutput}
+              editorContent={editorRealtimeContent}
+              chatHistory={currentChatHistory}
+              onArticleUpdate={handleArticleUpdate}
+              onChatHistoryUpdate={handleChatHistoryUpdate}
+              quotes={currentQuotes}
+              onRemoveQuote={handleRemoveQuote}
+              onClearQuotes={handleClearQuotes}
+            />
+          </>
         ) : (
           <div className="empty-session-message">
             请创建会话

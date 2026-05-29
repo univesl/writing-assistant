@@ -1,8 +1,6 @@
 import apiClient from './axiosConfig'
 
-// 写作功能API
 export const writeApi = {
-  // 快速写作（流式）
   quickWrite: async (sessionId, prompt, modelType = 'general') => {
     return apiClient.post('/write/quick', {
       session_id: sessionId,
@@ -11,22 +9,33 @@ export const writeApi = {
     })
   },
   
-  // 保存内容
-  saveContent: async (sessionId, content, contentType) => {
+  saveContent: async (sessionId, content, contentType, contentCategory = 'chat', role = 'user') => {
     return apiClient.post('/write/save', {
       session_id: sessionId,
       content: content,
-      content_type: contentType
+      content_type: contentType,
+      content_category: contentCategory,
+      role: role
     })
   },
   
-  // 获取会话历史内容
   getSessionContent: async (sessionId) => {
     const response = await apiClient.get(`/content/get/${sessionId}`)
     return response || []
   },
   
-  // 上传参考文档
+  getArticle: async (sessionId) => {
+    const response = await apiClient.get(`/content/article/${sessionId}`)
+    return response || { article_content: '' }
+  },
+  
+  saveArticle: async (sessionId, articleContent) => {
+    return apiClient.post('/content/article/save', {
+      session_id: sessionId,
+      article_content: articleContent
+    })
+  },
+  
   uploadReference: async (file) => {
     const formData = new FormData()
     formData.append('file', file)
@@ -37,7 +46,6 @@ export const writeApi = {
     })
   },
   
-  // 导出文档
   exportDocument: async (sessionId, exportType = 'md', referenceDoc = null) => {
     let url = `/content/export/${sessionId}?export_type=${exportType}`
     if (referenceDoc) {
@@ -49,15 +57,12 @@ export const writeApi = {
     return response
   },
   
-  // 清空会话内容
   clearSessionContent: async (sessionId) => {
     return apiClient.delete(`/content/clear/${sessionId}`)
   }
 }
 
-// Mock数据服务（当后端未实现时使用）
 export const writeMock = {
-  // 快速写作（模拟流式响应）
   quickWrite: async (sessionId, prompt, modelType = 'general') => {
     return new Promise((resolve) => {
       setTimeout(() => {
@@ -69,14 +74,12 @@ export const writeMock = {
     })
   },
   
-  // 保存内容
   saveContent: async (sessionId, content, contentType) => {
     return {
       content_id: Date.now()
     }
   },
   
-  // 获取会话历史内容
   getSessionContent: async (sessionId) => {
     return [
       {

@@ -24,8 +24,18 @@ venv/
 .env.local
 .env.*.local
 writing_assistant.db
+*.db
+session_files/
+upload/
+data/
 
+# Environment files
+.env
+.env.*
+!env.example
 
+# IDE
+.trae/
 
 # Editor directories and files
 .vscode/*

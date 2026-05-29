@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, UploadFile, File
+from fastapi import APIRouter, Depends, UploadFile, File, BackgroundTasks
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session as OrmSession
 from sqlalchemy import asc
@@ -6,14 +6,23 @@ import os
 import subprocess
 import tempfile
 import re
+import requests
 from pathlib import Path
 from datetime import datetime
+from pydantic import BaseModel
 
 from ..database import get_db
 from ..models import Session as SessionModel, Content as ContentModel
 from ..utils import ok, err, dt_str
+from ..schemas import SaveArticleIn
+from ..services.mineru_service import mineru_service
 
 router = APIRouter(prefix="/content", tags=["content"])
+
+
+class GuardCheckIn(BaseModel):
+    session_id: int = None
+    text: str
 
 
 @router.get("/get/{session_id}")
@@ -24,7 +33,7 @@ def get_contents(session_id: int, db: OrmSession = Depends(get_db)):
 
     rows = (
         db.query(ContentModel)
-        .filter(ContentModel.session_id == session_id)
+        .filter(ContentModel.session_id == session_id, ContentModel.content_category == "chat")
         .order_by(asc(ContentModel.created_at))
         .all()
     )
@@ -33,11 +42,41 @@ def get_contents(session_id: int, db: OrmSession = Depends(get_db)):
             "content_id": r.content_id,
             "content": r.content,
             "content_type": r.content_type,
+            "content_category": r.content_category,
+            "role": r.role,
             "created_at": dt_str(r.created_at),
         }
         for r in rows
     ]
     return ok(data)
+
+
+@router.get("/article/{session_id}")
+def get_article(session_id: int, db: OrmSession = Depends(get_db)):
+    s = db.get(SessionModel, session_id)
+    if not s:
+        return err(404, "会话不存在")
+    
+    return ok({
+        "article_content": s.article_content or ""
+    })
+
+
+@router.post("/article/save")
+def save_article(data: SaveArticleIn, db: OrmSession = Depends(get_db)):
+    try:
+        s = db.get(SessionModel, data.session_id)
+        if not s:
+            return err(404, "会话不存在")
+        
+        s.article_content = data.article_content
+        db.commit()
+        
+        return ok(None, "文章保存成功")
+    
+    except Exception as e:
+        print(f"[DEBUG] 保存文章失败: {str(e)}")
+        return err(500, f"保存失败: {str(e)}")
 
 
 @router.delete("/clear/{session_id}")
@@ -67,131 +106,101 @@ def clear_session_content(session_id: int, db: OrmSession = Depends(get_db)):
 @router.post("/upload")
 async def upload_reference_document(file: UploadFile = File(...)):
     """
-    上传参考文档，支持.docx和.md文件
-    .docx文件会保存到format文件夹中作为模板
-    .md文件会转换为.docx后保存到format文件夹中
+    上传参考文档，支持 .pdf、.docx、.md、.txt 文件
+    所有格式最终都会转换为 Markdown 内容用于 AI 处理
     """
     try:
-        # 检查文件类型
         file_extension = Path(file.filename).suffix.lower()
-        
-        if file_extension not in ['.docx', '.md']:
-            return err(400, "不支持的文件类型，请上传.docx或.md文件")
-        
-        # 使用相对路径获取format文件夹
-        format_dir = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'format')
-        format_dir = os.path.abspath(format_dir)
-        
-        # 如果format文件夹不存在，自动创建
-        if not os.path.exists(format_dir):
-            os.makedirs(format_dir)
-            print(f"[DEBUG] 已自动创建format文件夹: {format_dir}")
-        
-        # 如果是.docx文件，直接保存到format文件夹
-        if file_extension == '.docx':
-            try:
-                # 保存到format文件夹
-                docx_path = os.path.join(format_dir, file.filename)
-                with open(docx_path, 'wb') as f:
-                    content = await file.read()
-                    f.write(content)
-                
-                print(f"[DEBUG] 模板文件已保存: {docx_path}")
-                
-                # 读取markdown内容用于预览
-                temp_file_path = None
-                try:
-                    # 创建临时文件用于转换
-                    with tempfile.NamedTemporaryFile(delete=False, suffix='.docx') as temp_file:
-                        temp_file.write(content)
-                        temp_file_path = temp_file.name
-                    
-                    # 使用pandoc转换.docx为markdown
-                    output_md_path = temp_file_path.replace('.docx', '.md')
-                    result = subprocess.run(
-                        ['pandoc', '-f', 'docx', '-t', 'markdown', '-o', output_md_path, temp_file_path],
-                        capture_output=True,
-                        text=True,
-                        timeout=30
-                    )
-                    
-                    if result.returncode == 0:
-                        # 读取转换后的markdown内容
-                        with open(output_md_path, 'r', encoding='utf-8') as f:
-                            markdown_content = f.read()
-                    else:
-                        markdown_content = ""
-                    
-                    # 清理临时文件
-                    if temp_file_path and os.path.exists(temp_file_path):
-                        os.unlink(temp_file_path)
-                    if os.path.exists(output_md_path):
-                        os.unlink(output_md_path)
-                    
-                except Exception as e:
-                    print(f"[DEBUG] 转换预览内容失败: {str(e)}")
-                    markdown_content = ""
-                
-                return ok({
-                    "filename": file.filename,
-                    "content": markdown_content,
-                    "type": "docx"
-                }, "模板上传成功")
-                
-            except Exception as e:
-                print(f"[DEBUG] 保存docx文件出错: {str(e)}")
-                return err(500, f"模板保存失败: {str(e)}")
-        
-        # 如果是.md文件，转换为.docx后保存到format文件夹
+        allowed_extensions = ['.pdf', '.docx', '.md', '.txt']
+
+        if file_extension not in allowed_extensions:
+            return err(400, f"不支持的文件类型，请上传 {', '.join(allowed_extensions)} 文件")
+
+        content_bytes = await file.read()
+        markdown_content = None
+
+        if file_extension == '.pdf':
+            markdown_content = await _process_pdf(content_bytes, file.filename)
+        elif file_extension == '.docx':
+            markdown_content = await _process_docx(content_bytes, file.filename)
         elif file_extension == '.md':
-            try:
-                # 读取markdown内容
-                content = await file.read()
-                markdown_content = content.decode('utf-8')
-                
-                # 创建临时markdown文件
-                with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.md', encoding='utf-8') as temp_file:
-                    temp_file.write(markdown_content)
-                    temp_file_path = temp_file.name
-                
-                # 转换为.docx文件名
-                docx_filename = Path(file.filename).stem + '.docx'
-                docx_path = os.path.join(format_dir, docx_filename)
-                
-                # 使用pandoc转换.md为.docx
-                result = subprocess.run(
-                    ['pandoc', '-f', 'markdown', '-t', 'docx', '-o', docx_path, temp_file_path],
-                    capture_output=True,
-                    text=True,
-                    timeout=30
-                )
-                
-                # 清理临时文件
-                os.unlink(temp_file_path)
-                
-                if result.returncode != 0:
-                    print(f"[DEBUG] Pandoc转换失败: {result.stderr}")
-                    return err(500, f"文档转换失败: {result.stderr}")
-                
-                print(f"[DEBUG] 模板文件已保存: {docx_path}")
-                
-                return ok({
-                    "filename": docx_filename,
-                    "content": markdown_content,
-                    "type": "docx"
-                }, "模板上传并转换成功")
-                
-            except Exception as e:
-                print(f"[DEBUG] 转换md文件出错: {str(e)}")
-                return err(500, f"模板转换失败: {str(e)}")
-        
+            markdown_content = content_bytes.decode('utf-8')
+        elif file_extension == '.txt':
+            markdown_content = _txt_to_markdown(content_bytes.decode('utf-8'))
+
+        if markdown_content is None:
+            return err(500, "文件处理失败")
+
+        return ok({
+            "filename": file.filename,
+            "content": markdown_content,
+            "type": "markdown",
+            "original_type": file_extension[1:]
+        }, f"文档上传成功（{file_extension[1:]} -> Markdown）")
+
     except Exception as e:
         print(f"[DEBUG] 文件上传过程中出错: {str(e)}")
         return err(500, f"文件上传失败: {str(e)}")
 
 
+async def _process_pdf(content_bytes: bytes, filename: str) -> str:
+    """处理PDF文件：保存临时文件并调用MinerU API解析"""
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
+        temp_file.write(content_bytes)
+        temp_path = temp_file.name
+
+    try:
+        result = mineru_service.parse_pdf_to_markdown(temp_path)
+        return result or ""
+    finally:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+
+
+async def _process_docx(content_bytes: bytes, filename: str) -> str:
+    """处理DOCX文件：使用pandoc转换为Markdown"""
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.docx') as temp_file:
+        temp_file.write(content_bytes)
+        docx_temp_path = temp_file.name
+
+    md_temp_path = docx_temp_path.replace('.docx', '.md')
+
+    try:
+        result = subprocess.run(
+            ['pandoc', '-f', 'docx', '-t', 'markdown', '-o', md_temp_path, docx_temp_path],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+
+        if result.returncode == 0 and os.path.exists(md_temp_path):
+            with open(md_temp_path, 'r', encoding='utf-8') as f:
+                return f.read()
+        else:
+            print(f"[DEBUG] Pandoc转换docx失败: {result.stderr}")
+            return ""
+    finally:
+        for p in [docx_temp_path, md_temp_path]:
+            if os.path.exists(p):
+                os.unlink(p)
+
+
+def _txt_to_markdown(text: str) -> str:
+    """将纯文本转换为简单Markdown格式"""
+    lines = text.split('\n')
+    md_lines = []
+    for line in lines:
+        if line.strip():
+            md_lines.append(line)
+        else:
+            md_lines.append('')
+    return '\n'.join(md_lines)
+
+
 @router.get("/export/{session_id}")
-def export_document(session_id: int, export_type: str = "md", reference_doc: str = None, db: OrmSession = Depends(get_db)):
+def export_document(session_id: int, background_tasks: BackgroundTasks, export_type: str = "md", reference_doc: str = None, db: OrmSession = Depends(get_db)):
     """
     导出会话内容为文档
     export_type: "md" 或 "docx"
@@ -207,23 +216,12 @@ def export_document(session_id: int, export_type: str = "md", reference_doc: str
         if not s:
             return err(404, "会话不存在")
         
-        # 获取会话的所有内容
-        rows = (
-            db.query(ContentModel)
-            .filter(ContentModel.session_id == session_id)
-            .order_by(asc(ContentModel.created_at))
-            .all()
-        )
-        
-        # 只获取最新的内容（AI生成的回复）
-        if not rows:
+        # 获取文章主体内容
+        if not s.article_content:
             return err(404, "该会话没有可导出的内容")
         
-        # 只导出最新的内容，去除可能的前缀（如"标题："、"正文："等）
-        latest_content = rows[-1].content
-        
         # 清理内容：去除"标题："、"正文："等前缀
-        cleaned_content = re.sub(r'^(标题：|正文：|Title:|Content:)\s*', '', latest_content, flags=re.MULTILINE)
+        cleaned_content = re.sub(r'^(标题：|正文：|Title:|Content:)\s*', '', s.article_content, flags=re.MULTILINE)
         
         # 去除开头和结尾的空白
         cleaned_content = cleaned_content.strip()
@@ -244,6 +242,8 @@ def export_document(session_id: int, export_type: str = "md", reference_doc: str
             temp_file_path = temp_file.name
             
             filename = f"{s.session_name}_{timestamp}.md"
+            
+            background_tasks.add_task(os.unlink, temp_file_path)
             
             return FileResponse(
                 path=temp_file_path,
@@ -299,6 +299,8 @@ def export_document(session_id: int, export_type: str = "md", reference_doc: str
             
             filename = f"{s.session_name}_{timestamp}.docx"
             
+            background_tasks.add_task(os.unlink, temp_docx_path)
+            
             return FileResponse(
                 path=temp_docx_path,
                 media_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -308,3 +310,48 @@ def export_document(session_id: int, export_type: str = "md", reference_doc: str
     except Exception as e:
         print(f"[DEBUG] 导出文档过程中出错: {str(e)}")
         return err(500, f"导出文档失败: {str(e)}")
+
+
+GUARD_API_URL = "http://10.70.247.28:8006/guard"
+
+
+@router.post("/guard")
+def check_content_guard(data: GuardCheckIn):
+    """
+    内容审查：调用 guard 服务检查文本内容
+    """
+    if not data.text or not data.text.strip():
+        return err(400, "审查内容不能为空")
+
+    try:
+        response = requests.post(
+            GUARD_API_URL,
+            json={"text": data.text},
+            timeout=30
+        )
+        response.raise_for_status()
+        result = response.json()
+
+        return ok({
+            "harmful": result.get("harmful", "false"),
+            "harmful_type": result.get("harmful_type", "none"),
+            "harmful_type_label": result.get("harmful_type_label", "无"),
+            "harmful_reason": result.get("harmful_reason", ""),
+            "harmful_words": result.get("harmful_words", ""),
+            "harmful_degree": result.get("harmful_degree", "none"),
+            "harmful_degree_label": result.get("harmful_degree_label", "无"),
+            "confidence": result.get("confidence", "low"),
+            "confidence_label": result.get("confidence_label", "低"),
+            "highlight_spans": result.get("highlight_spans", []),
+            "stage": result.get("stage"),
+        }, "内容审查完成")
+
+    except requests.exceptions.Timeout:
+        print(f"[DEBUG] 内容审查服务超时")
+        return err(504, "内容审查服务超时，请稍后重试")
+    except requests.exceptions.ConnectionError:
+        print(f"[DEBUG] 内容审查服务连接失败")
+        return err(502, "内容审查服务暂时不可用")
+    except Exception as e:
+        print(f"[DEBUG] 内容审查失败: {str(e)}")
+        return err(500, f"内容审查失败: {str(e)}")

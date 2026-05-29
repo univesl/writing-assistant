@@ -1,126 +1,90 @@
-# LLM系统API客户端
-from openai import OpenAI, AsyncOpenAI
+# LLM系统API客户端（支持h3i平台）
+import requests
+import json
+import re
 from typing import AsyncGenerator, Generator, List, Dict, Optional
 import logging
 import os
 from dotenv import load_dotenv
+import asyncio
 
-# 加载环境变量
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
+
 load_dotenv()
 
-# LLM系统API配置（用于问题定位）
-LLM_API_KEY = os.getenv("LLM_API_KEY", "f93082e1-2cbf-4f81-af8f-9c98d528b6b1")
-LLM_API_URL = os.getenv("LLM_API_URL", "https://xhang.buaa.edu.cn/xhang/v1")
-LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "xhang")
+LLM_API_URL = os.getenv("LLM_API_URL", "http://model.ic.h3i.buaa.edu.cn/v1")
+LLM_API_KEY = os.getenv("LLM_API_KEY", "")
+LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "Qwen2.5-72B-Instruct")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
 class LLMAPIClient:
-    def __init__(self):
-        """初始化LLM API客户端"""
-        self.client = OpenAI(
-            api_key=LLM_API_KEY,
-            base_url=LLM_API_URL
-        )
-        self.async_client = AsyncOpenAI(
-            api_key=LLM_API_KEY,
-            base_url=LLM_API_URL
-        )
-        self.model_name = LLM_MODEL_NAME
+    """LLM模型API客户端（使用h3i平台）"""
     
-    def chat_completion(self, messages: List[Dict], stream: bool = True, temperature: float = 0.7, max_tokens: int = 1000) -> any:
-        """调用LLM API进行对话
+    def __init__(self):
+        if OpenAI is None:
+            raise ImportError("openai库未安装，请运行: pip install openai")
         
-        Args:
-            messages: 对话消息列表，格式：[{"role": "user", "content": "问题内容"}]
-            stream: 是否使用流式响应（默认为True）
-            temperature: 温度参数
-            max_tokens: 最大token数
-            
-        Returns:
-            流式响应生成器或完整响应对象
-        """
+        self.api_url = LLM_API_URL
+        self.api_key = LLM_API_KEY
+        self.model_name = LLM_MODEL_NAME
+        self.client = OpenAI(
+            api_key=self.api_key,
+            base_url=self.api_url
+        )
+        logger.info(f"LLM客户端初始化完成，API地址: {self.api_url}")
+    
+    def _prepare_messages(self, question: str, system_prompt: Optional[str] = None) -> List[Dict]:
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": question})
+        return messages
+    
+    def stream_chat(self, question: str, system_prompt: Optional[str] = None) -> Generator[str, None, None]:
         try:
+            messages = self._prepare_messages(question, system_prompt)
             response = self.client.chat.completions.create(
                 model=self.model_name,
                 messages=messages,
-                stream=stream,
-                temperature=temperature,
-                max_tokens=max_tokens
+                temperature=0.7,
+                max_tokens=2000,
+                stream=True
             )
-            return response
-        except Exception as e:
-            logger.error(f"LLM API调用失败: {e}")
-            raise
-    
-    def stream_chat(self, question: str, system_prompt: Optional[str] = None) -> Generator[str, None, None]:
-        """流式对话接口
-        
-        Args:
-            question: 用户问题
-            system_prompt: 系统提示词
-            
-        Yields:
-            AI回答的文本片段
-        """
-        try:
-            messages = []
-            if system_prompt:
-                messages.append({"role": "system", "content": system_prompt})
-            messages.append({"role": "user", "content": question})
-            
-            response = self.chat_completion(messages, stream=True)
             
             for chunk in response:
-                if chunk.choices[0].delta.content:
-                    yield chunk.choices[0].delta.content
+                if chunk.choices and len(chunk.choices) > 0:
+                    content = chunk.choices[0].delta.content
+                    if content:
+                        yield content
         except Exception as e:
-            logger.error(f"流式对话失败: {e}")
-            yield f"对话失败: {str(e)}"
-    
-    async def async_chat_completion(self, messages: List[Dict], temperature: float = 0.7, max_tokens: int = 1000) -> str:
-        """异步调用LLM API进行对话
-        
-        Args:
-            messages: 对话消息列表
-            temperature: 温度参数
-            max_tokens: 最大token数
-            
-        Returns:
-            完整的响应文本
-        """
-        try:
-            response = await self.async_client.chat.completions.create(
-                model=self.model_name,
-                messages=messages,
-                stream=False,
-                temperature=temperature,
-                max_tokens=max_tokens
-            )
-            return response.choices[0].message.content
-        except Exception as e:
-            logger.error(f"异步LLM API调用失败: {e}")
-            return f"调用失败: {str(e)}"
+            logger.error(f"LLM流式对话失败: {e}")
+            yield f"生成失败：{str(e)}"
     
     async def async_chat(self, question: str, system_prompt: Optional[str] = None) -> str:
-        """异步对话接口
-        
-        Args:
-            question: 用户问题
-            system_prompt: 系统提示词
-            
-        Returns:
-            AI回答的完整文本
-        """
         try:
-            messages = []
-            if system_prompt:
-                messages.append({"role": "system", "content": system_prompt})
-            messages.append({"role": "user", "content": question})
+            messages = self._prepare_messages(question, system_prompt)
+            response = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=messages,
+                temperature=0.7,
+                max_tokens=2000,
+                stream=False
+            )
             
-            response = await self.async_chat_completion(messages)
-            return response
+            if response.choices and len(response.choices) > 0:
+                return response.choices[0].message.content
+            return ""
         except Exception as e:
-            logger.error(f"异步对话失败: {e}")
-            return f"对话失败: {str(e)}"
+            logger.error(f"LLM异步对话失败: {e}")
+            return f"生成失败：{str(e)}"
+
+
+def get_llm_client(model_type: str = None):
+    """获取LLM客户端实例"""
+    return LLMAPIClient()

@@ -1,0 +1,377 @@
+.field-extraction-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.field-extraction-modal {
+  background: white;
+  border-radius: 8px;
+  width: 90%;
+  max-width: 900px;
+  max-height: 90vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+
+.field-extraction-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid #e8e8e8;
+  background-color: #f8f9fa;
+}
+
+.field-extraction-modal-header h2 {
+  margin: 0;
+  font-size: 18px;
+  color: #333;
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  font-size: 24px;
+  color: #666;
+  cursor: pointer;
+  padding: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+}
+
+.close-btn:hover {
+  background-color: #e8e8e8;
+  color: #333;
+}
+
+.field-extraction-modal-body {
+  padding: 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.file-selector {
+  margin-bottom: 20px;
+  padding: 15px;
+  background-color: #f8f9fa;
+  border-radius: 6px;
+}
+
+.file-selector label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 500;
+  color: #333;
+}
+
+.file-selector select {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  font-size: 14px;
+  background-color: white;
+}
+
+.file-selector select:focus {
+  outline: none;
+  border-color: #1890ff;
+  box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.2);
+}
+
+.model-selector {
+  margin-top: 15px;
+}
+
+.model-selector label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 500;
+  color: #333;
+}
+
+.model-selector select {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  font-size: 14px;
+  background-color: white;
+}
+
+.field-extraction-modal .extract-btn {
+  margin-top: 15px;
+  padding: 10px 24px;
+  background-color: #1890ff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background-color 0.2s;
+}
+
+.field-extraction-modal .extract-btn:hover:not(:disabled) {
+  background-color: #40a9ff;
+}
+
+.field-extraction-modal .extract-btn:disabled {
+  background-color: #d9d9d9;
+  cursor: not-allowed;
+}
+
+.loading-state {
+  text-align: center;
+  padding: 40px;
+  color: #666;
+}
+
+.loading-spinner {
+  display: inline-block;
+  width: 40px;
+  height: 40px;
+  border: 3px solid #f3f3f3;
+  border-top: 3px solid #1890ff;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-bottom: 15px;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.empty-state {
+  text-align: center;
+  padding: 40px;
+  color: #999;
+}
+
+.empty-state-icon {
+  font-size: 48px;
+  margin-bottom: 15px;
+}
+
+.fields-container {
+  background-color: #fff;
+  border: 1px solid #e8e8e8;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.fields-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px 20px;
+  background-color: #e6f7ff;
+  border-bottom: 1px solid #e8e8e8;
+}
+
+.fields-header h3 {
+  margin: 0;
+  font-size: 16px;
+  color: #1890ff;
+}
+
+.file-info {
+  font-size: 13px;
+  color: #666;
+}
+
+.fields-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.fields-table tr {
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.fields-table tr:last-child {
+  border-bottom: none;
+}
+
+.fields-table td {
+  padding: 12px 16px;
+  vertical-align: top;
+}
+
+.field-label {
+  width: 200px;
+  background-color: #fafafa;
+  font-weight: 500;
+  color: #333;
+  border-right: 1px solid #f0f0f0;
+}
+
+.field-value {
+  color: #555;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.field-value.empty {
+  color: #999;
+  font-style: italic;
+}
+
+.error-state {
+  text-align: center;
+  padding: 40px;
+  color: #ff4d4f;
+}
+
+.error-state-icon {
+  font-size: 48px;
+  margin-bottom: 15px;
+}
+
+.retry-btn {
+  margin-top: 15px;
+  padding: 8px 20px;
+  background-color: #ff4d4f;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.retry-btn:hover {
+  background-color: #ff7875;
+}
+
+/* 成功状态 */
+.success-state {
+  text-align: center;
+  padding: 20px;
+  background-color: #f6ffed;
+  border: 1px solid #b7eb8f;
+  border-radius: 6px;
+  margin-bottom: 20px;
+  color: #52c41a;
+}
+
+.success-state-icon {
+  font-size: 32px;
+  margin-bottom: 8px;
+}
+
+/* 字段编辑输入框 */
+.field-input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  font-size: 14px;
+  color: #333;
+  background-color: white;
+  transition: all 0.2s;
+}
+
+.field-input:focus {
+  outline: none;
+  border-color: #1890ff;
+  box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.2);
+}
+
+.field-select {
+  cursor: pointer;
+  appearance: auto;
+  min-width: 150px;
+}
+
+.field-textarea {
+  resize: vertical;
+  min-height: 80px;
+  font-family: inherit;
+  line-height: 1.5;
+}
+
+/* 操作按钮区域 */
+.fields-actions {
+  display: flex;
+  gap: 12px;
+  padding: 15px 20px;
+  background-color: #fafafa;
+  border-top: 1px solid #e8e8e8;
+  justify-content: flex-end;
+}
+
+.edit-btn {
+  padding: 8px 20px;
+  background-color: #1890ff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background-color 0.2s;
+}
+
+.edit-btn:hover {
+  background-color: #40a9ff;
+}
+
+.save-btn {
+  padding: 8px 20px;
+  background-color: #52c41a;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background-color 0.2s;
+}
+
+.save-btn:hover:not(:disabled) {
+  background-color: #73d13d;
+}
+
+.save-btn:disabled {
+  background-color: #d9d9d9;
+  cursor: not-allowed;
+}
+
+.cancel-btn {
+  padding: 8px 20px;
+  background-color: white;
+  color: #666;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.cancel-btn:hover:not(:disabled) {
+  color: #1890ff;
+  border-color: #1890ff;
+}
+
+.cancel-btn:disabled {
+  color: #d9d9d9;
+  border-color: #d9d9d9;
+  cursor: not-allowed;
+}
