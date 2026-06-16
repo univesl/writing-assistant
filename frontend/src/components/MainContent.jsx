@@ -55,15 +55,11 @@ function MainContent({ currentSession, currentOutput, editorContent, chatHistory
     setIsGenerating(true)
     
     let userDisplayContent = ''
-    let prompt = ''
     
     const articleContent = getArticleContent()
     const isEditRequest = articleContent && quickRequirements && quickRequirements.trim()
     
     if (isEditRequest) {
-      const styleName = templateType === 'notice' ? '通知' : 
-                        templateType === 'regulation' ? '规章制度' : 
-                        templateType === 'speech' ? '讲话稿' : '正式文章'
       userDisplayContent = quickRequirements
     } else {
       if (templateType === 'notice') {
@@ -85,33 +81,12 @@ function MainContent({ currentSession, currentOutput, editorContent, chatHistory
     writeApi.saveContent(currentSession.id, userDisplayContent, 'quick', 'chat', 'user').catch(() => {})
     
     try {
-      if (isEditRequest) {
-        const styleName = templateType === 'notice' ? '通知' : 
-                          templateType === 'regulation' ? '规章制度' : 
-                          templateType === 'speech' ? '讲话稿' : '正式文章'
-        
-        prompt = `现有文章内容：
-${articleContent}
-
-用户要求：${quickRequirements}
-
-请根据用户要求修改或扩展上述文章。如果用户的要求与现有文章无关（比如要求写一个完全不同的新文章），请告知用户需要创建新会话来写新文章。
-
-【文体类型】${styleName}
-【风格要求】请参照北航真实公文风格：语言正式、严谨、规范。修改后的文章应符合${styleName}的写作规范，保持整体风格统一、逻辑严谨。
-
-请严格按照以下格式输出内容：
-
----ARTICLE---
-[这里是修改后的完整文章内容，使用Markdown格式。标题用#开头，各级标题用相应数量的#，正文直接书写]
-
----SUMMARY---
-[这里是对修改内容的简要说明，说明主要做了哪些修改，不超过100字]`
-      } else {
+      // 收集结构化数据
+      let ragContent = ''
+      let ragReferences = []
+      
+      if (!isEditRequest) {
         // 生成新文章时，先调用知识库生成 API
-        let knowledgeBaseContent = ''
-        let knowledgeBaseReferences = []
-        
         try {
           const topic = quickRequirements && quickRequirements.trim() 
             ? `${quickRequirements}`
@@ -130,204 +105,27 @@ ${articleContent}
           )
           
           if (generateResult && generateResult.content) {
-            knowledgeBaseContent = generateResult.content
-            knowledgeBaseReferences = generateResult.references || []
-            console.log('知识库生成成功，参考文献:', knowledgeBaseReferences)
+            ragContent = generateResult.content
+            ragReferences = generateResult.references || []
+            console.log('知识库生成成功，参考文献:', ragReferences)
           }
         } catch (error) {
           console.error('知识库生成失败:', error)
         }
-        
-        const getStylePrompt = (type, requirements, ragContent, ragRefs, refDocs, quoteList) => {
-          // 基础信息
-          const baseInfo = requirements || '未提供具体要求'
-          
-          // RAG参考信息
-          let ragSection = ''
-          if (ragContent) {
-            const typeName = type === 'notice' ? '通知' : type === 'regulation' ? '规章制度' : type === 'speech' ? '讲话稿' : '公文'
-            ragSection = `\n\n【北航真实公文原文参考】\n以下是从北航公文知识库检索到的真实公文原文，请作为本次撰写的核心参考，重点学习其格式结构、用语习惯和行文风格：\n\n${ragContent}`
-            ragSection += `\n\n【重要提示】如果上述参考公文的文体与本次要写的"${typeName}"不同，请只参考其语言风格和公文用语习惯，不要照搬其内容结构。本次需要严格按照"${typeName}"的规范格式来组织文章。`
-            if (ragRefs && ragRefs.length > 0) {
-              ragSection += `\n\n参考来源：${ragRefs.join('、')}`
-            }
-          }
-          
-          // 参考文档
-          let docSection = ''
-          if (refDocs && refDocs.length > 0) {
-            docSection = `\n\n【参考文档】\n以下文档供内容参考（提取关键信息，不要照搬）：\n`
-            refDocs.forEach((doc, index) => {
-              const docLabel = doc.type === 'upload' ? '上传参考' : '知识库参考'
-              docSection += `\n[${docLabel} ${index + 1}: ${doc.filename}]\n${doc.content.substring(0, 4000)}${doc.content.length > 4000 ? '...' : ''}\n`
-            })
-          }
-          
-          // 引用内容
-          let quoteSection = ''
-          if (quoteList && quoteList.length > 0) {
-            quoteSection = `\n\n【引用内容】\n以下内容需融入文章（适当引用，灵活处理）：\n`
-            quoteList.forEach((quote, index) => {
-              quoteSection += `\n引用${index + 1}：${quote.text}\n`
-            })
-          }
-          
-          // 根据不同文体返回不同提示词
-          if (type === 'notice') {
-            return `你是一位专业的公文写作专家。请参照北航真实公文风格：语言正式、严谨、规范，撰写一篇【通知】公文。
-
-【核心要求】（以用户要求为主线）
-${baseInfo}
-
-【通知公文写作规范】
-1. 标题格式：严格按照"关于XXX的通知"格式，如"北京航空航天大学关于召开2025年教学工作会议的通知"。标题居中，不加书名号，不加标点。
-2. 正文结构：
-   - 开头称谓：顶格写称呼（如"各单位："、"各位老师："），后用冒号
-   - 开头：交代发文缘由、目的或依据（常用"为了……"、"根据……"、"按照……"等句式）
-   - 主体：分条叙述，使用"一、"、"二、"、"三、"编号。每条内容明确具体，涉及时间、地点、人员等关键信息必须精确
-   - 结尾：使用"特此通知。"收束全文
-3. 落款：发文单位名称（居右）、发文日期（居右，用中文数字"二〇二五年X月X日"格式）
-4. 语言特点：简洁明了、准确规范、指令性强。使用"应"、"须"、"请"、"不得"等公文常用词
-5. 段落格式：段首空两格，层次分明${ragSection}${docSection}${quoteSection}
-
-【写作原则】
-- 严格以用户提供的核心要求为主线，不得偏离主题
-- 参考知识库的格式和风格，但不要照搬其内容
-- 时间、地点、人员等关键信息必须明确具体
-- 建议控制在500-800字，根据实际需要调整，避免冗长
-- 模仿北航公文严谨风格：多用陈述句，少用感叹句；用语规范，避免口语化
-
-请按照以下格式输出：
-
----ARTICLE---
-[通知正文，使用Markdown格式]
-
----SUMMARY---
-[100字以内总结]`
-          } else if (type === 'regulation') {
-            return `你是一位专业的公文写作专家。请参照北航真实公文风格：语言正式、严谨、规范，撰写一篇【规章制度】。
-
-【核心要求】（以用户要求为主线）
-${baseInfo}
-
-【规章制度写作规范】
-1. 标题格式：直接使用规章制度名称（如"实验室安全管理制度"），不冠以发文单位
-2. 正文结构（采用标准章条款结构）：
-   - 第一章 总则：说明制定目的（"为/为了……"）、适用范围（"本办法适用于……"）、基本原则
-   - 第X章 具体章节：按内容逻辑分章，每章下设若干条款。章节命名规范，如"第二章 组织机构与职责"
-   - 最后一章 附则：说明解释权归属、生效日期（"本办法自发布之日起施行"）
-3. 条款格式规范：
-   - 使用"第X条"连续编号，从头至尾不中断
-   - 一条一义，每条只规定一个事项
-   - 必要时使用"（一）（二）（三）"分款，分款内使用"1. 2. 3."进一步细分
-   - 引用其他条款时使用"本制度第X条"
-4. 语言特点：严谨规范、权责明确、可操作性强。使用"应当"、"不得"、"须"、"方可"等法规范用语
-5. 行文要求：条理清晰、相互衔接、逻辑严密，避免重复和矛盾${ragSection}${docSection}${quoteSection}
-
-【写作原则】
-- 严格以用户提供的核心要求为主线构建条款
-- 参考知识库的条款结构和表述方式，但不要照搬内容
-- 权利义务必须对等，逻辑严密
-- 建议控制在800-1500字，根据实际需要调整，条款清晰完整
-- 参照北航规章制度风格：用语规范、结构严谨、层次分明
-
-请按照以下格式输出：
-
----ARTICLE---
-[规章制度正文，使用Markdown格式]
-
----SUMMARY---
-[100字以内总结]`
-          } else if (type === 'speech') {
-            return `你是一位专业的讲话稿撰稿人。请参照北航真实公文风格：语言正式、严谨、规范，撰写一篇【讲话稿】。
-
-【核心要求】（以用户要求为主线）
-${baseInfo}
-
-【讲话稿写作规范】
-1. 标题：简洁有力，点明主题。可使用"在XXX会议上的讲话"或"凝心聚力 开拓创新——在XXX会议上的讲话"等格式
-2. 开场问候：
-   - 顶格写称呼，如"尊敬的各位领导、各位老师："、"各位来宾、各位同事："
-   - 称呼后用冒号
-   - 另起一段写开场语（"大家好！"、"上午好！"等）
-   - 致谢或引入正题
-3. 正文结构（层次递进）：
-   - 第一部分：肯定成绩/说明背景/指出意义（"过去一年……"、"当前……"）
-   - 第二部分：分析形势/指出问题/提出要求（"但同时我们也应看到……"）
-   - 第三部分：部署工作/明确方向/发出号召（"下一步，我们要……"）
-   - 各部分之间使用"一、"、"二、"、"三、"或"首先"、"其次"、"再次"过渡
-4. 结尾：
-   - 总结要点，升华主题
-   - 发出号召或提出希望（"让我们……"）
-   - 致谢收束（"谢谢大家！"）
-5. 语言特点：
-   - 口语化与书面化结合，适合朗读
-   - 长短句结合，节奏感强
-   - 适当使用排比、对仗、设问等修辞手法增强感染力
-   - 情感真挚，接地气，避免空洞套话
-   - 多用"我们"增强认同感${ragSection}${docSection}${quoteSection}
-
-【写作原则】
-- 严格以用户提供的核心要求为主线组织内容
-- 参考知识库的讲话风格，但不要照搬其内容
-- 要有现场感，听众能听得进去
-- 建议控制在800-1500字，根据实际需要调整，适合8-15分钟演讲
-- 参照北航讲话稿风格：内容务实、语言精炼、层次分明、有号召力
-
-请按照以下格式输出：
-
----ARTICLE---
-[讲话稿正文，使用Markdown格式]
-
----SUMMARY---
-[100字以内总结]`
-          } else {
-            // 通用文章
-            return `你是一位专业的公文写作专家。请参照北航真实公文风格：语言正式、严谨、规范，撰写一篇正式文章。
-
-【核心要求】
-${baseInfo}
-
-【正式公文写作规范】
-1. 标题：简洁明确，概括全文主旨
-2. 正文结构：
-   - 开头：说明背景、目的或依据，开门见山
-   - 主体：条理清晰，逻辑严密，分层次阐述
-   - 结尾：总结全文，或提出要求、展望
-3. 语言要求：
-   - 用语正式、严谨、规范
-   - 用词准确，避免歧义
-   - 句式完整，避免口语化表达
-   - 适当使用公文惯用语（"现将……如下"、"特此……"等）
-4. 段落格式：层次分明，段落衔接自然
-5. 落款：发文单位名称（居右）、发文日期（居右，用中文数字"二〇二五年X月X日"格式）
-6. 行文风格：客观中立，实事求是，不夸张不渲染${ragSection}${docSection}${quoteSection}
-
-【写作原则】
-- 严格以用户提供的核心要求为主线，不得偏离主题
-- 参考知识库的格式和风格，但不要照搬其内容
-- 建议控制在600-1000字，根据实际需要调整
-- 参照北航正式公文风格：逻辑严谨、用语规范、结构完整
-
-请按照以下格式输出：
-
----ARTICLE---
-[文章内容，使用Markdown格式]
-
----SUMMARY---
-[100字以内总结]`
-          }
+      }
+      
+      // 构建引用内容列表
+      const quoteList = quotes ? quotes.map(q => q.text) : []
+      
+      // 构建上传文档内容
+      let refContent = ''
+      let refFilename = ''
+      if (referenceDocuments && referenceDocuments.length > 0) {
+        const uploadDoc = referenceDocuments.find(doc => doc.type === 'upload')
+        if (uploadDoc) {
+          refContent = uploadDoc.content || ''
+          refFilename = uploadDoc.filename || ''
         }
-        
-        // 构建完整提示词
-        prompt = getStylePrompt(
-          templateType,
-          quickRequirements,
-          knowledgeBaseContent,
-          knowledgeBaseReferences,
-          referenceDocuments,
-          quotes
-        )
       }
       
       const url = '/api/write/quick'
@@ -338,7 +136,16 @@ ${baseInfo}
         },
         body: JSON.stringify({
           session_id: currentSession.id,
-          prompt: prompt,
+          mode: isEditRequest ? 'edit' : 'quick',
+          style: templateType || 'general',
+          user_requirements: quickRequirements || '',
+          reference_content: refContent,
+          reference_filename: refFilename,
+          rag_content: ragContent,
+          rag_references: ragReferences,
+          quotes: quoteList,
+          article_content: isEditRequest ? articleContent : '',
+          extracted_fields: {},
           model_type: 'general',
           llm_model: 'qwen'
         })
@@ -757,50 +564,7 @@ ${baseInfo}
     const originalQuotes = hasQuotes ? quotes.map(q => q.text) : []
     
     try {
-      let prompt
-      let userDisplayContent
-      
-      if (hasQuotes) {
-        prompt = `你是一个专业的文字编辑助手。用户需要修改文章中的部分内容。
-
-原始文章内容：
-${articleContent}
-
-用户选中的需要修改的内容：
-${originalQuotes.map((q, i) => `--- 引用 ${i + 1} ---\n${q}`).join('\n')}
-
-用户的修改要求：${chatInput}
-
-请根据用户的修改要求，对选中内容进行修改，并输出完整的修改后文章。
-注意：只修改用户选中的部分，保持文章其余部分不变。
-【风格要求】请保持北航公文的正式风格：语言严谨、准确、简练，保持客观中立的官方口吻。
-
-请严格按照以下格式输出：
-
----ARTICLE---
-[这里是修改后的完整文章内容，使用Markdown格式]
-
----SUMMARY---
-[简要说明做了什么修改，不超过50字]`
-        userDisplayContent = chatInput
-      } else {
-        prompt = `现有文章内容：
-${articleContent}
-
-用户要求：${chatInput}
-
-请根据用户要求修改或扩展上述文章。
-【风格要求】请保持北航公文的正式风格：语言严谨、准确、简练，保持客观中立的官方口吻。
-
-请严格按照以下格式输出内容：
-
----ARTICLE---
-[这里是修改后的完整文章内容，使用Markdown格式。标题用#开头，各级标题用相应数量的#，正文直接书写]
-
----SUMMARY---
-[这里是对修改内容的简要说明，说明主要做了哪些修改，不超过100字]`
-        userDisplayContent = chatInput
-      }
+      const userDisplayContent = chatInput
       
       const newChatHistory = [...displayChatHistory, {
         role: 'user',
@@ -817,11 +581,20 @@ ${articleContent}
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          session_id: currentSession.id,
-          prompt: prompt,
-          model_type: 'general',
-          llm_model: 'qwen'
-        })
+            session_id: currentSession.id,
+            mode: 'edit',
+            style: templateType || 'general',
+            user_requirements: chatInput.trim(),
+            reference_content: '',
+            reference_filename: '',
+            rag_content: '',
+            rag_references: [],
+            quotes: originalQuotes,
+            article_content: articleContent,
+            extracted_fields: {},
+            model_type: 'general',
+            llm_model: 'qwen'
+          })
       })
       
       if (response.body && response.body.getReader) {

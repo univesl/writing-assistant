@@ -1,5 +1,5 @@
 import asyncio
-from typing import AsyncGenerator, Literal, List, Dict
+from typing import AsyncGenerator, Literal, List, Dict, Union
 import sys
 import os
 
@@ -9,78 +9,29 @@ from llm import LLMAPIClient, get_llm_client
 
 DEFAULT_MODEL = "qwen"
 
+
 def get_client(model_type: str = None):
     """根据模型类型获取对应的客户端"""
     if model_type is None:
         model_type = DEFAULT_MODEL
     return get_llm_client(model_type)
 
-async def build_quick_output(prompt: str, model_type: Literal["general", "creative"], llm_model: str = DEFAULT_MODEL) -> str:
-    """调用LLM生成快速写作内容"""
-    try:
-        if model_type == "creative":
-            system_prompt = "你是一个创意文案专家，请根据用户提供的提示生成富有创意和吸引力的文案。"
-        else:
-            system_prompt = "你是一个专业文案撰写人，请根据用户提供的提示生成结构完整、表达清晰的通用文案。"
-        
-        client = get_client(llm_model)
-        response = await client.async_chat(prompt, system_prompt=system_prompt)
-        return response
-    except Exception as e:
-        return f"生成失败：{str(e)}"
 
-async def build_step_output(product_name: str, selling_points: list[str], style: str, length: str, llm_model: str = DEFAULT_MODEL) -> str:
-    """调用LLM生成分步写作内容"""
-    try:
-        sp = "；".join([s for s in selling_points if s.strip()]) or "（暂无卖点）"
-        
-        prompt = (
-            f"请为产品 '{product_name}' 生成一份文案，要求如下：\n"
-            f"- 产品卖点：{sp}\n"
-            f"- 写作风格：{style}\n"
-            f"- 内容长度：{length}\n"
-            f"请确保文案结构清晰、重点突出。"
-        )
-        
-        system_prompt = "你是一个专业的产品文案策划师，请根据用户提供的产品信息生成结构化的产品文案。"
-        
-        client = get_client(llm_model)
-        response = await client.async_chat(prompt, system_prompt=system_prompt)
-        return response
-    except Exception as e:
-        return f"生成失败：{str(e)}"
-
-async def polish_text(content: str, polish_type: str, llm_model: str = DEFAULT_MODEL) -> str:
-    """调用LLM进行文本校对润色"""
-    try:
-        if polish_type == "check":
-            prompt = f"请检查以下文本的语法和拼写错误，并进行修正：\n\n{content}"
-            system_prompt = "你是一个专业的文本校对员，请检查用户提供的文本并修正语法和拼写错误。"
-        elif polish_type == "optimize":
-            prompt = f"请优化以下文本的表达，使其更加流畅自然：\n\n{content}"
-            system_prompt = "你是一个专业的文本优化师，请优化用户提供的文本表达，使其更加流畅自然。"
-        else:
-            prompt = f"请扩写以下文本，增加更多细节和背景信息：\n\n{content}"
-            system_prompt = "你是一个专业的文本扩写师，请扩写用户提供的文本，增加更多细节和背景信息。"
-        
-        client = get_client(llm_model)
-        response = await client.async_chat(prompt, system_prompt=system_prompt)
-        return response
-    except Exception as e:
-        return content + f"\n\n（润色失败：{str(e)}）"
-
-async def stream_text_from_llm(question: str, system_prompt: str = None, llm_model: str = DEFAULT_MODEL) -> AsyncGenerator[str, None]:
+async def stream_text_from_llm(
+    messages_or_prompt: Union[str, List[Dict[str, str]]],
+    system_prompt: str = None,
+    llm_model: str = DEFAULT_MODEL,
+) -> AsyncGenerator[str, None]:
     """从LLM流式获取文本响应
     
     Args:
-        question: 用户问题
-        system_prompt: 系统提示词
-        llm_model: LLM模型类型，xhang 或 qwen
+        messages_or_prompt: 可以是 messages 列表 [{"role": "system", "content": "..."}, {"role": "user", "content": "..."}]
+                           也可以是纯字符串 prompt（兼容旧调用）
+        system_prompt: 系统提示词（仅当 messages_or_prompt 是字符串时使用）
+        llm_model: LLM模型类型
     """
     try:
-        print(f"[DEBUG] 调用LLM，问题：{question}")
-        print(f"[DEBUG] 系统提示词：{system_prompt}")
-        print(f"[DEBUG] 使用模型：{llm_model}")
+        print(f"[DEBUG] 调用LLM")
         
         loop = asyncio.get_running_loop()
         client = get_client(llm_model)
@@ -88,7 +39,12 @@ async def stream_text_from_llm(question: str, system_prompt: str = None, llm_mod
         def sync_stream():
             try:
                 print("[DEBUG] 开始同步调用LLM API")
-                result = client.stream_chat(question, system_prompt=system_prompt)
+                if isinstance(messages_or_prompt, list):
+                    # 直接使用 messages 列表
+                    result = client.stream_chat_with_messages(messages_or_prompt)
+                else:
+                    # 兼容旧调用方式
+                    result = client.stream_chat(messages_or_prompt, system_prompt=system_prompt)
                 print(f"[DEBUG] 获取到流式生成器：{type(result)}")
                 return result
             except Exception as e:
@@ -117,6 +73,7 @@ async def stream_text_from_llm(question: str, system_prompt: str = None, llm_mod
         import traceback
         traceback.print_exc()
         yield f"生成失败：{str(e)}"
+
 
 async def stream_text(full_text: str, chunk_size: int = 1, delay: float = 0.01) -> AsyncGenerator[str, None]:
     """本地流式输出文本（作为备用）"""

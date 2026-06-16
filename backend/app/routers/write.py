@@ -11,6 +11,7 @@ from ..models import Session as SessionModel, Content as ContentModel
 from ..schemas import WriteQuickIn, WriteSaveIn
 from ..utils import ok, err
 from ..services.llm import stream_text_from_llm
+from ..services.prompt_builder import build_prompt
 
 router = APIRouter(prefix="/write", tags=["write"])
 
@@ -34,16 +35,32 @@ async def write_quick(payload: WriteQuickIn, db: OrmSession = Depends(get_db)):
     else:
         print(f"[DEBUG] 会话ID {payload.session_id} 存在")
 
-    # system_prompt 设为简洁的助手角色，详细的角色设定和格式要求已在前端提示词中
-    system_prompt = "你是用户的写作助手，请严格按照用户的要求和格式说明生成内容。"
+    # 使用 PromptBuilder 统一构建 prompt
+    messages = build_prompt(
+        mode=payload.mode,
+        style=payload.style,
+        data={
+            "user_requirements": payload.user_requirements,
+            "reference_content": payload.reference_content,
+            "reference_filename": payload.reference_filename,
+            "rag_content": payload.rag_content,
+            "rag_references": payload.rag_references,
+            "quotes": payload.quotes,
+            "article_content": payload.article_content,
+            "extracted_fields": payload.extracted_fields,
+            "style": payload.style,
+        },
+    )
     
     llm_model = payload.llm_model or "xhang"
     print(f"[DEBUG] 使用的LLM模型: {llm_model}")
+    print(f"[DEBUG] 构建的 system prompt 长度: {len(messages[0]['content'])}")
+    print(f"[DEBUG] 构建的 user prompt 长度: {len(messages[1]['content'])}")
 
     async def gen():
         full_text = ""
         chunk_count = 0
-        async for chunk in stream_text_from_llm(payload.prompt, system_prompt=system_prompt, llm_model=llm_model):
+        async for chunk in stream_text_from_llm(messages, llm_model=llm_model):
             chunk_count += 1
             print(f"[DEBUG] yield chunk #{chunk_count}: {chunk[:50] if len(chunk) > 50 else chunk}...")
             full_text += chunk

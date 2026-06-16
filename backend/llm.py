@@ -66,6 +66,26 @@ class LLMAPIClient:
             logger.error(f"LLM流式对话失败: {e}")
             yield f"生成失败：{str(e)}"
     
+    def stream_chat_with_messages(self, messages: List[Dict]) -> Generator[str, None, None]:
+        """使用完整的 messages 列表进行流式对话"""
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=messages,
+                temperature=0.7,
+                max_tokens=4000,
+                stream=True
+            )
+            
+            for chunk in response:
+                if chunk.choices and len(chunk.choices) > 0:
+                    content = chunk.choices[0].delta.content
+                    if content:
+                        yield content
+        except Exception as e:
+            logger.error(f"LLM流式对话失败: {e}")
+            yield f"生成失败：{str(e)}"
+    
     async def async_chat(self, question: str, system_prompt: Optional[str] = None) -> str:
         try:
             messages = self._prepare_messages(question, system_prompt)

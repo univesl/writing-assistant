@@ -12,7 +12,16 @@ class SessionRenameIn(BaseModel):
 
 class WriteQuickIn(BaseModel):
     session_id: int
-    prompt: str = Field(..., min_length=1)
+    mode: str = "quick"  # "quick" | "edit" | "reply" | "imitate" | "general_ref"
+    style: str = "general"  # "notice" | "regulation" | "speech" | "general"
+    user_requirements: str = ""
+    reference_content: str = ""
+    reference_filename: str = ""
+    rag_content: str = ""
+    rag_references: list = []
+    quotes: list = []
+    article_content: str = ""
+    extracted_fields: dict = {}
     model_type: Optional[Literal["general", "creative"]] = "general"
     llm_model: Optional[Literal["xhang", "qwen"]] = "xhang"
 

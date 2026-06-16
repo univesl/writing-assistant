@@ -67,11 +67,11 @@ function EditorSidebar({ currentSession, currentOutput, onArticleUpdate, onAddQu
     
     lines.forEach((line, index) => {
       // 匹配标准Markdown标题
-      let headingMatch = line.match(/^(#{1,6})\s+(.*)$/)
+      let headingMatch = line.match(/^(#{1,6})(?:\s+|)(.*)$/)
       let level = 1
       let text = ''
       
-      if (headingMatch) {
+      if (headingMatch && headingMatch[2].trim()) {
         // 标准Markdown标题
         level = headingMatch[1].length
         text = headingMatch[2].trim()
@@ -511,7 +511,7 @@ function EditorSidebar({ currentSession, currentOutput, onArticleUpdate, onAddQu
               {editorContent ? (
                 <div className="content-display">
                   {editorContent.split('\n').map((line, index) => {
-                    const headingMatch = line.match(/^(#{1,6})\s+(.*)$/)
+                    const headingMatch = line.match(/^(#{1,6})(?:\s+|)(.*)$/)
                     const trimmedLine = line.trim()
                     
                     let isHeading = false
@@ -519,7 +519,7 @@ function EditorSidebar({ currentSession, currentOutput, onArticleUpdate, onAddQu
                     let displayText = line
                     let isMainTitle = false
                     
-                    if (headingMatch) {
+                    if (headingMatch && headingMatch[2].trim()) {
                       isHeading = true
                       headingLevel = headingMatch[1].length
                       displayText = headingMatch[2].trim()
