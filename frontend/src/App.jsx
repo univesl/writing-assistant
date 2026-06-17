@@ -395,9 +395,9 @@ function App() {
             3
           )
 
-          if (generateResult && generateResult.data) {
-            ragContent = generateResult.data.content || ''
-            ragReferences = generateResult.data.references || []
+          if (generateResult) {
+            ragContent = generateResult.content || ''
+            ragReferences = generateResult.references || []
           }
         } catch (error) {
           console.error('知识库生成失败:', error)

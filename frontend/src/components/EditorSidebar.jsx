@@ -62,8 +62,8 @@ function EditorSidebar({ currentSession, currentOutput, onArticleUpdate, onEdito
         text = line.trim()
         level = 1
         headingMatch = true
-      } else if (/^[一二三四五六七八九十]+、/.test(line.trim())) {
-        // 中文数字标题（如"一、放假时间安排"）
+      } else if (/^[一二三四五六七八九十]+、/.test(line.trim()) && line.trim().length <= 30 && !line.trim().includes('。')) {
+        // 中文数字标题（如"一、放假时间安排"），不超过30字且不含句号
         text = line.trim()
         level = 1
         headingMatch = true
@@ -617,8 +617,8 @@ function EditorSidebar({ currentSession, currentOutput, onArticleUpdate, onEdito
                       isHeading = true
                       headingLevel = 1
                       displayText = trimmedLine
-                    } else if (/^[一二三四五六七八九十]+、/.test(trimmedLine) && trimmedLine.length <= 20) {
-                      // 中文数字标题（如"一、放假时间安排"），超过20字视为正文条目
+                    } else if (/^[一二三四五六七八九十]+、/.test(trimmedLine) && trimmedLine.length <= 30 && !trimmedLine.includes('。')) {
+                      // 中文数字标题（如"一、放假时间安排"），超过30字或含句号视为正文条目
                       isHeading = true
                       headingLevel = 1
                       displayText = trimmedLine
