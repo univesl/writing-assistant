@@ -499,18 +499,24 @@ function App() {
         // 需要先上传文件获取内容
         const fileData = await uploadFileToSession(uploadDoc.file)
 
+        // 如果上传后没有解析出内容，尝试本地读取
+        let refContent = fileData?.parsed_content || ''
+        if (!refContent && uploadDoc.file) {
+          refContent = await readFileAsText(uploadDoc.file)
+        }
+
         const response = await fetch('/api/generate/reference-write', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             session_id: currentSession.id,
-            reference_content: fileData?.parsed_content || '',
+            reference_content: refContent,
             reference_filename: uploadDoc.filename || '',
             generate_type: referenceWriteType,
             topic: referenceRequirements.trim() || uploadDoc.filename || '',
             requirements: referenceRequirements.trim() || '',
             model_name: 'qwen3-235b',
-            use_knowledge_base: true,
+            use_knowledge_base: false,
             top_k: 3
           })
         })
@@ -591,6 +597,17 @@ function App() {
       console.error('文件上传失败:', error)
       return null
     }
+  }
+
+  // 读取本地文件内容作为 fallback
+  const readFileAsText = (file) => {
+    return new Promise((resolve) => {
+      if (!file) return resolve('')
+      const reader = new FileReader()
+      reader.onload = (e) => resolve(e.target.result)
+      reader.onerror = () => resolve('')
+      reader.readAsText(file)
+    })
   }
 
   return (
