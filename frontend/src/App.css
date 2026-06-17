@@ -66,6 +66,12 @@ body {
   border-right: 1px solid #e8ecef;
 }
 
+/* StartPage 作为全宽页面 */
+.start-page {
+  flex: 1;
+  min-width: 0;
+}
+
 /* 空会话提示 */
 .empty-session-message {
   flex: 1;

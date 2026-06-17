@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react'
 import './EditorSidebar.css'
 import { writeApi } from '../api/writeApi'
 
-function EditorSidebar({ currentSession, currentOutput, onArticleUpdate, onAddQuote, onEditorContentChange }) {
+function EditorSidebar({ currentSession, currentOutput, onArticleUpdate, onEditorContentChange }) {
   const [editorContent, setEditorContent] = useState('')
   const [isEditing, setIsEditing] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
@@ -15,12 +15,16 @@ function EditorSidebar({ currentSession, currentOutput, onArticleUpdate, onAddQu
   const contentRef = useRef(null)
   const resizeRef = useRef(null)
   const isResizingRef = useRef(false)
-  
-  const [showQuoteMenu, setShowQuoteMenu] = useState(false)
-  const [quoteMenuPosition, setQuoteMenuPosition] = useState({ x: 0, y: 0 })
+
+  // AI 修改对话框状态
+  const [showAIDialog, setShowAIDialog] = useState(false)
+  const [aiDialogPosition, setAIDialogPosition] = useState({ x: 0, y: 0 })
   const [selectedText, setSelectedText] = useState('')
+  const [aiEditRequest, setAiEditRequest] = useState('')
+  const [isAiEditing, setIsAiEditing] = useState(false)
   const selectionTimeoutRef = useRef(null)
   const previewRef = useRef(null)
+  const aiDialogRef = useRef(null)
 
   // 辅助函数：标准化文本，去除Markdown标记以便匹配
   const normalizeTextForMatching = (text) => {
@@ -35,42 +39,20 @@ function EditorSidebar({ currentSession, currentOutput, onArticleUpdate, onAddQu
       .trim()
   }
 
-  // 辅助函数：在Markdown原文中定位选中文本
-  const findSelectedTextInOutput = (selectedText) => {
-    if (!currentOutput || !selectedText) return null
-    
-    const normalizedSelected = normalizeTextForMatching(selectedText)
-    if (!normalizedSelected) return null
-    
-    const lines = currentOutput.split('\n')
-    for (let i = 0; i < lines.length; i++) {
-      const normalizedLine = normalizeTextForMatching(lines[i])
-      if (normalizedLine.includes(normalizedSelected)) {
-        return {
-          lineIndex: i,
-          matchedLine: lines[i],
-          exactMatch: lines[i].includes(selectedText)
-        }
-      }
-    }
-    
-    return null
-  }
-
   // 生成目录
   const generateTableOfContents = (content) => {
     if (!content) return []
-    
+
     const lines = content.split('\n')
     const toc = []
     let idCounter = 0
-    
+
     lines.forEach((line, index) => {
       // 匹配标准Markdown标题
       let headingMatch = line.match(/^(#{1,6})(?:\s+|)(.*)$/)
       let level = 1
       let text = ''
-      
+
       if (headingMatch && headingMatch[2].trim()) {
         // 标准Markdown标题
         level = headingMatch[1].length
@@ -86,11 +68,10 @@ function EditorSidebar({ currentSession, currentOutput, onArticleUpdate, onAddQu
         level = 1
         headingMatch = true
       }
-      // 移除数字点号开头的标题判断，因为"1. xxx"通常是列表项而非标题
-      
+
       if (headingMatch) {
         const id = `heading-${idCounter++}`
-        
+
         toc.push({
           id,
           text,
@@ -100,7 +81,7 @@ function EditorSidebar({ currentSession, currentOutput, onArticleUpdate, onAddQu
         })
       }
     })
-    
+
     return toc
   }
 
@@ -202,10 +183,10 @@ function EditorSidebar({ currentSession, currentOutput, onArticleUpdate, onAddQu
     try {
       const referenceDoc = exportType === 'docx' ? 'template.docx' : null
       const response = await writeApi.exportDocument(currentSession.id, exportType, referenceDoc)
-      
+
       let blob
       let filename
-      
+
       if (response instanceof Blob) {
         blob = response
       } else if (response.data instanceof Blob) {
@@ -220,12 +201,12 @@ function EditorSidebar({ currentSession, currentOutput, onArticleUpdate, onAddQu
       } else {
         throw new Error('响应格式错误')
       }
-      
+
       if (!filename) {
         const ext = exportType === 'md' ? 'md' : 'docx'
         filename = `${currentSession.name || '文档'}_${new Date().toISOString().slice(0, 10)}.${ext}`
       }
-      
+
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
@@ -295,7 +276,7 @@ function EditorSidebar({ currentSession, currentOutput, onArticleUpdate, onAddQu
       const tocSidebar = document.querySelector('.toc-sidebar')
       const rect = tocSidebar.getBoundingClientRect()
       const newWidth = e.clientX - rect.left
-      
+
       // 限制最小和最大宽度
       const maxWidth = window.innerWidth * 0.5 // 最多占据一半屏幕
       if (newWidth >= 180 && newWidth <= maxWidth) {
@@ -309,42 +290,125 @@ function EditorSidebar({ currentSession, currentOutput, onArticleUpdate, onAddQu
     isResizingRef.current = false
   }
 
+  // 处理选中文本 —— 弹出 AI 修改对话框
   const handleTextSelection = useCallback(() => {
+    if (isEditing) return // 编辑模式下不触发
+
     const selection = window.getSelection()
     const text = selection.toString().trim()
-    
+
     if (text.length > 0) {
       const range = selection.getRangeAt(0)
       const rect = range.getBoundingClientRect()
-      
+
       setSelectedText(text)
-      setQuoteMenuPosition({
+      setAiEditRequest('')
+      setAIDialogPosition({
         x: rect.left + rect.width / 2,
         y: rect.top - 10
       })
-      setShowQuoteMenu(true)
+      setShowAIDialog(true)
     } else {
-      setShowQuoteMenu(false)
+      setShowAIDialog(false)
       setSelectedText('')
     }
-  }, [])
+  }, [isEditing])
 
-  const handleAddQuote = () => {
-    if (selectedText && onAddQuote) {
-      const matchResult = findSelectedTextInOutput(selectedText)
-      onAddQuote(selectedText, matchResult)
+  // 处理 AI 修改请求
+  const handleAiEdit = async () => {
+    if (!selectedText || !aiEditRequest.trim() || !currentSession) return
+
+    setIsAiEditing(true)
+    try {
+      const articleContent = editorContent || currentOutput || ''
+
+      const response = await fetch('/api/write/quick', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: currentSession.id,
+          mode: 'edit',
+          style: 'general',
+          user_requirements: aiEditRequest.trim(),
+          reference_content: '',
+          reference_filename: '',
+          rag_content: '',
+          rag_references: [],
+          quotes: [selectedText],
+          article_content: articleContent,
+          extracted_fields: {},
+          model_type: 'general',
+          llm_model: 'qwen'
+        })
+      })
+
+      if (response.body && response.body.getReader) {
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder('utf-8')
+        let buffer = ''
+        let output = ''
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+
+          buffer += decoder.decode(value, { stream: true })
+          const events = buffer.split('\n\n')
+          buffer = events.pop() || ''
+
+          for (const event of events) {
+            if (event.startsWith('data:')) {
+              try {
+                const dataStr = event.slice(5).trim()
+                if (dataStr) {
+                  const data = JSON.parse(dataStr)
+                  if (data.content) {
+                    output += data.content
+                  }
+                }
+              } catch (e) { }
+            }
+          }
+        }
+
+        if (output) {
+          let articleResult = output
+          const articleMatch = output.match(/---ARTICLE---\n?([\s\S]*?)(?=---SUMMARY---|$)/)
+          if (articleMatch) {
+            articleResult = articleMatch[1].trim()
+          }
+
+          await writeApi.saveArticle(currentSession.id, articleResult)
+          if (onArticleUpdate) {
+            onArticleUpdate(currentSession.id, articleResult)
+          }
+        }
+      }
+    } catch (error) {
+      console.error('AI 修改失败:', error)
+      alert('AI 修改失败: ' + (error.message || '未知错误'))
+    } finally {
+      setIsAiEditing(false)
+      setShowAIDialog(false)
+      setSelectedText('')
+      setAiEditRequest('')
+      window.getSelection().removeAllRanges()
     }
-    setShowQuoteMenu(false)
+  }
+
+  // 关闭 AI 对话框
+  const handleCloseAIDialog = () => {
+    setShowAIDialog(false)
     setSelectedText('')
+    setAiEditRequest('')
     window.getSelection().removeAllRanges()
   }
 
   const handleClickOutside = useCallback((e) => {
-    if (showQuoteMenu && !e.target.closest('.quote-menu')) {
-      setShowQuoteMenu(false)
-      setSelectedText('')
+    if (showAIDialog && aiDialogRef.current && !aiDialogRef.current.contains(e.target)) {
+      handleCloseAIDialog()
     }
-  }, [showQuoteMenu])
+  }, [showAIDialog])
 
   useEffect(() => {
     document.addEventListener('click', handleClickOutside)
@@ -357,12 +421,12 @@ function EditorSidebar({ currentSession, currentOutput, onArticleUpdate, onAddQu
     const previewElement = previewRef.current
     if (previewElement && !isEditing) {
       let isSelecting = false
-      
+
       const handleMouseDown = () => {
         isSelecting = true
-        setShowQuoteMenu(false)
+        setShowAIDialog(false)
       }
-      
+
       const handleMouseUp = () => {
         if (isSelecting) {
           isSelecting = false
@@ -374,10 +438,10 @@ function EditorSidebar({ currentSession, currentOutput, onArticleUpdate, onAddQu
           }, 100)
         }
       }
-      
+
       previewElement.addEventListener('mousedown', handleMouseDown)
       previewElement.addEventListener('mouseup', handleMouseUp)
-      
+
       return () => {
         previewElement.removeEventListener('mousedown', handleMouseDown)
         previewElement.removeEventListener('mouseup', handleMouseUp)
@@ -405,35 +469,61 @@ function EditorSidebar({ currentSession, currentOutput, onArticleUpdate, onAddQu
 
   return (
     <div className="editor-sidebar">
-      {showQuoteMenu && (
-        <div 
-          className="quote-menu"
+      {/* AI 修改对话框 */}
+      {showAIDialog && (
+        <div
+          ref={aiDialogRef}
+          className="ai-edit-dialog"
           style={{
             position: 'fixed',
-            left: `${quoteMenuPosition.x}px`,
-            top: `${quoteMenuPosition.y}px`,
+            left: `${aiDialogPosition.x}px`,
+            top: `${aiDialogPosition.y}px`,
             transform: 'translate(-50%, -100%)',
             zIndex: 1000
           }}
         >
-          <button onClick={handleAddQuote} className="quote-menu-btn">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-              <polyline points="14 2 14 8 20 8"></polyline>
-              <line x1="16" y1="13" x2="8" y2="13"></line>
-              <line x1="16" y1="17" x2="8" y2="17"></line>
+          <div className="ai-edit-dialog-header">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
             </svg>
-            添加为引用
-          </button>
+            <span>AI 修改选中内容</span>
+            <button className="ai-edit-close" onClick={handleCloseAIDialog}>×</button>
+          </div>
+          <div className="ai-edit-dialog-body">
+            <div className="ai-edit-selected-text">
+              <span className="ai-edit-label">选中文本：</span>
+              <p className="ai-edit-text-preview">{selectedText.length > 100 ? selectedText.substring(0, 100) + '...' : selectedText}</p>
+            </div>
+            <textarea
+              className="ai-edit-input"
+              value={aiEditRequest}
+              onChange={(e) => setAiEditRequest(e.target.value)}
+              placeholder="输入修改要求..."
+              rows={3}
+              disabled={isAiEditing}
+            />
+          </div>
+          <div className="ai-edit-dialog-footer">
+            <button className="ai-edit-btn-cancel" onClick={handleCloseAIDialog}>取消</button>
+            <button
+              className="ai-edit-btn-confirm"
+              onClick={handleAiEdit}
+              disabled={isAiEditing || !aiEditRequest.trim()}
+            >
+              {isAiEditing ? '修改中...' : '确认修改'}
+            </button>
+          </div>
         </div>
       )}
+
       {/* 目录调整大小的手柄（在左侧） */}
-      <div 
+      <div
         className="resize-handle left-resize"
         onMouseDown={startResizing}
         ref={resizeRef}
       />
-      
+
       {/* 左侧目录区域 */}
       <div className="toc-sidebar" style={{ width: `${tocWidth}px` }}>
         <div className="toc-header">
@@ -442,7 +532,7 @@ function EditorSidebar({ currentSession, currentOutput, onArticleUpdate, onAddQu
         {tableOfContents.length > 0 ? (
           <ul className="toc-list">
             {tableOfContents.map((item, index) => (
-              <li 
+              <li
                 key={item.id}
                 className={`toc-item level-${item.level} ${item.isMainTitle ? 'toc-main-title' : ''}`}
                 onClick={() => scrollToHeading(item.lineIndex)}
@@ -472,14 +562,14 @@ function EditorSidebar({ currentSession, currentOutput, onArticleUpdate, onAddQu
             </button>
             {isEditing ? (
               <>
-                <button 
+                <button
                   className="editor-btn save-btn"
                   onClick={handleSave}
                   disabled={isSaving}
                 >
                   {isSaving ? '保存中...' : '保存'}
                 </button>
-                <button 
+                <button
                   className="editor-btn cancel-btn"
                   onClick={handleCancel}
                 >
@@ -487,7 +577,7 @@ function EditorSidebar({ currentSession, currentOutput, onArticleUpdate, onAddQu
                 </button>
               </>
             ) : (
-              <button 
+              <button
                 className="editor-btn edit-btn"
                 onClick={toggleEditMode}
               >
@@ -513,12 +603,12 @@ function EditorSidebar({ currentSession, currentOutput, onArticleUpdate, onAddQu
                   {editorContent.split('\n').map((line, index) => {
                     const headingMatch = line.match(/^(#{1,6})(?:\s+|)(.*)$/)
                     const trimmedLine = line.trim()
-                    
+
                     let isHeading = false
                     let headingLevel = 1
                     let displayText = line
                     let isMainTitle = false
-                    
+
                     if (headingMatch && headingMatch[2].trim()) {
                       isHeading = true
                       headingLevel = headingMatch[1].length
@@ -533,18 +623,17 @@ function EditorSidebar({ currentSession, currentOutput, onArticleUpdate, onAddQu
                       headingLevel = 1
                       displayText = trimmedLine
                     }
-                    // 移除数字点号开头的标题判断，因为"1. xxx"通常是列表项而非标题
-                    
+
                     displayText = displayText.replace(/\*\*(.+?)\*\*/g, '$1')
-                    
+
                     if (isHeading && index === 0) {
                       isMainTitle = true
                     }
-                    
+
                     return (
                       <div key={index} className="content-line">
                         {isHeading ? (
-                          <div 
+                          <div
                             className={`heading level-${headingLevel} ${isMainTitle ? 'main-title' : ''}`}
                             data-line-index={index}
                           >
