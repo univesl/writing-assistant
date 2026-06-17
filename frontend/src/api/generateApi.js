@@ -2,7 +2,7 @@ import axios from './axiosConfig'
 
 export const generateApi = {
   // 基于知识库生成文档
-  generateDocument: async (topic, requirements = '', modelName = 'qwen3-235b', useKnowledgeBase = true, topK = 3) => {
+  generateDocument: async (topic, requirements = '', modelName = 'Qwen2.5-72B-Instruct', useKnowledgeBase = true, topK = 3) => {
     const response = await axios.post('/generate/document', {
       topic,
       requirements,

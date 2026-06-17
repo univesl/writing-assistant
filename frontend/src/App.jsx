@@ -343,6 +343,7 @@ function App() {
     setIsGenerating(true)
 
     try {
+      const DEFAULT_MODEL = 'Qwen2.5-72B-Instruct'
       const { writingMode, templateType, quickRequirements, referenceDocuments, referenceWriteType, referenceRequirements } = config
 
       // 构建用户显示内容
@@ -395,7 +396,7 @@ function App() {
           const generateResult = await generateApi.generateDocument(
             topic,
             quickRequirements || '',
-            'qwen3-235b',
+            DEFAULT_MODEL,
             true,
             3
           )
@@ -499,10 +500,14 @@ function App() {
         // 需要先上传文件获取内容
         const fileData = await uploadFileToSession(uploadDoc.file)
 
-        // 如果上传后没有解析出内容，尝试本地读取
+        // 如果后端没有解析出内容，尝试本地读取
         let refContent = fileData?.parsed_content || ''
         if (!refContent && uploadDoc.file) {
-          refContent = await readFileAsText(uploadDoc.file)
+          // PDF 文件不适合 readAsText，只对 md/txt 做本地 fallback
+          const ext = uploadDoc.file.name?.split('.').pop()?.toLowerCase()
+          if (ext === 'md' || ext === 'txt') {
+            refContent = await readFileAsText(uploadDoc.file)
+          }
         }
 
         const response = await fetch('/api/generate/reference-write', {
@@ -515,7 +520,7 @@ function App() {
             generate_type: referenceWriteType,
             topic: referenceRequirements.trim() || uploadDoc.filename || '',
             requirements: referenceRequirements.trim() || '',
-            model_name: 'qwen3-235b',
+            model_name: DEFAULT_MODEL,
             use_knowledge_base: false,
             top_k: 3
           })
