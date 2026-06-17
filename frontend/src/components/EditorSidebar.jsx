@@ -362,8 +362,15 @@ function EditorSidebar({ currentSession, currentOutput, onArticleUpdate, onEdito
                 const dataStr = event.slice(5).trim()
                 if (dataStr) {
                   const data = JSON.parse(dataStr)
+                  if (data.finish) continue
                   if (data.content) {
                     output += data.content
+                    // 增量渲染：实时更新编辑器内容
+                    const articleMatch = output.match(/---ARTICLE---\n?([\s\S]*?)(?=---SUMMARY---|$)/)
+                    const partialContent = articleMatch ? articleMatch[1].trim() : output
+                    if (onArticleUpdate) {
+                      onArticleUpdate(currentSession.id, partialContent)
+                    }
                   }
                 }
               } catch (e) { }

@@ -111,9 +111,11 @@ function App() {
   const loadSessionContent = async (sessionId) => {
     console.log('loadSessionContent called with sessionId:', sessionId)
     try {
-      console.log('Calling getArticle API with sessionId:', sessionId)
-      const articleResponse = await writeApi.getArticle(sessionId)
-      console.log('getArticle response:', articleResponse)
+      const [articleResponse, chatResponse] = await Promise.all([
+        writeApi.getArticle(sessionId),
+        writeApi.getSessionContent(sessionId)
+      ])
+
       if (articleResponse && articleResponse.article_content) {
         setCurrentSessionOutput(articleResponse.article_content)
         // 会话有文章内容时自动切换到内容页
@@ -123,9 +125,6 @@ function App() {
         setCurrentSessionOutput('')
       }
 
-      console.log('Calling getSessionContent API with sessionId:', sessionId)
-      const chatResponse = await writeApi.getSessionContent(sessionId)
-      console.log('getSessionContent response:', chatResponse)
       if (chatResponse && chatResponse.length > 0) {
         setCurrentChatHistory(chatResponse.map(item => ({
           role: item.role,
@@ -381,9 +380,11 @@ function App() {
       writeApi.saveContent(currentSession.id, userDisplayContent, writingMode === 'quick' ? 'quick' : 'reference', 'chat', 'user').catch(() => {})
 
       if (writingMode === 'quick') {
-        // RAG 统一由后端在 /api/write/quick 中自动做，前端不预调用
         const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), 120000)  // 2 分钟超时
+        const timeoutId = setTimeout(() => controller.abort(), 120000)
+
+        console.time('[perf] 快速写作 - 总耗时')
+        console.time('[perf] 快速写作 - TTFB (首 chunk)')
 
         const response = await fetch('/api/write/quick', {
           method: 'POST',
@@ -412,6 +413,7 @@ function App() {
           const decoder = new TextDecoder('utf-8')
           let buffer = ''
           let output = ''
+          let hasFirstChunk = false
 
           while (true) {
             const { done, value } = await reader.read()
@@ -427,8 +429,18 @@ function App() {
                   const dataStr = event.slice(5).trim()
                   if (dataStr) {
                     const data = JSON.parse(dataStr)
+                    // 检查是否 finish 信号
+                    if (data.finish) continue
                     if (data.content) {
+                      if (!hasFirstChunk) {
+                        hasFirstChunk = true
+                        console.timeEnd('[perf] 快速写作 - TTFB (首 chunk)')
+                      }
                       output += data.content
+                      // 增量渲染：每收到一个 chunk 都更新编辑器内容
+                      const articleMatch = output.match(/---ARTICLE---\n?([\s\S]*?)(?=---SUMMARY---|$)/)
+                      const partialContent = articleMatch ? articleMatch[1].trim() : output
+                      setCurrentSessionOutput(partialContent)
                     }
                   }
                 } catch (e) {
@@ -437,6 +449,8 @@ function App() {
               }
             }
           }
+
+          console.timeEnd('[perf] 快速写作 - 总耗时')
 
           if (output) {
             let articleContent = output

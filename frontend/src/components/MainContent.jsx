@@ -1,22 +1,13 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import { writeApi } from '../api/writeApi'
 
 function MainContent({ currentSession, editorContent, chatHistory, onArticleUpdate, onChatHistoryUpdate }) {
   const [isGenerating, setIsGenerating] = useState(false)
   const [chatInput, setChatInput] = useState('')
-  const [displayChatHistory, setDisplayChatHistory] = useState([])
 
   const getArticleContent = () => {
     return editorContent || ''
   }
-
-  useEffect(() => {
-    if (chatHistory && chatHistory.length > 0) {
-      setDisplayChatHistory(chatHistory)
-    } else {
-      setDisplayChatHistory([])
-    }
-  }, [chatHistory])
 
   const handleEditSubmit = async () => {
     if (!currentSession || !chatInput.trim()) {
@@ -34,11 +25,13 @@ function MainContent({ currentSession, editorContent, chatHistory, onArticleUpda
     try {
       const userDisplayContent = chatInput
 
-      const newChatHistory = [...displayChatHistory, {
+      const newChatHistory = [...(chatHistory || []), {
         role: 'user',
         content: userDisplayContent
       }]
-      setDisplayChatHistory(newChatHistory)
+      if (onChatHistoryUpdate) {
+        onChatHistoryUpdate(currentSession.id, newChatHistory)
+      }
 
       writeApi.saveContent(currentSession.id, userDisplayContent, 'quick', 'chat', 'user').catch(() => {})
 
@@ -86,8 +79,15 @@ function MainContent({ currentSession, editorContent, chatHistory, onArticleUpda
                   const dataStr = event.slice(5).trim()
                   if (dataStr) {
                     const data = JSON.parse(dataStr)
+                    if (data.finish) continue
                     if (data.content) {
                       output += data.content
+                      // 增量渲染：实时更新编辑器内容
+                      const articleMatch = output.match(/---ARTICLE---\n?([\s\S]*?)(?=---SUMMARY---|$)/)
+                      const partialContent = articleMatch ? articleMatch[1].trim() : output
+                      if (onArticleUpdate) {
+                        onArticleUpdate(currentSession.id, partialContent)
+                      }
                     }
                   }
                 } catch (e) {
@@ -121,13 +121,11 @@ function MainContent({ currentSession, editorContent, chatHistory, onArticleUpda
               role: 'assistant',
               content: summaryContent
             }]
-            setDisplayChatHistory(updatedChatHistory)
-
-            await writeApi.saveContent(currentSession.id, summaryContent, 'quick', 'chat', 'assistant')
-
             if (onChatHistoryUpdate) {
               onChatHistoryUpdate(currentSession.id, updatedChatHistory)
             }
+
+            await writeApi.saveContent(currentSession.id, summaryContent, 'quick', 'chat', 'assistant')
           }
         } catch (e) {
           console.error('Stream reading error:', e)
@@ -155,7 +153,7 @@ function MainContent({ currentSession, editorContent, chatHistory, onArticleUpda
   return (
     <div className="main-content chatgpt-style">
       <div className="chat-history">
-        {displayChatHistory.map((message, index) => (
+        {(chatHistory || []).map((message, index) => (
           <div key={index} className={`chat-message ${message.role}`}>
             <div className="message-content">
               <div className="message-header">
