@@ -146,6 +146,79 @@ A100 服务器上 kng 容器的相关配置：
 - **API 路径**: `/api/v1/chats_openai/default/chat/completions` (兼容 OpenAI 格式)
 - **数据目录**: `/home/liubin/kng-dev/kng-dev/`
 
-## 关于本文件
+## A100 服务器运维指南
 
-本文件应随项目推进不断完善，记录开发实践中遇到的问题和解决方案。
+### 服务概况
+
+| 服务 | Screen 会话名 | 端口 | 技术栈 |
+|------|-------------|------|--------|
+| **后端** | `writing-assistant` | 9000 | uvicorn + FastAPI |
+| **KnG 知识库** | `kng` | 50001 (Docker) | kng-rag |
+| **前端** | build 托管（无 screen） | 8000 (nginx/静态) | Vite build |
+| **内网穿透** | `p2p-proxy` | - | frp/内网穿透 |
+| **内网穿透后端** | `p2p-proxy-backend` | - | frp/内网穿透 |
+| **文档提取** | `extraction` | - | doc-extraction-server |
+
+### 重启服务
+
+1. **激活环境**
+   ```bash
+   conda activate writing
+   ```
+
+2. **重启后端**
+   ```bash
+   # 杀掉旧后端进程
+   # 注意：只杀掉 liubin 用户的 uvicorn 进程，不要动其他用户的进程
+   pkill -u liubin -f "uvicorn app.main:app" 2>/dev/null
+
+   # 进入 screen 会话重启
+   screen -r writing-assistant
+   # 在 screen 中执行：
+   conda activate writing
+   cd ~/writing-assistant/backend
+   uvicorn app.main:app --host 0.0.0.0 --port 9000
+   # Ctrl+A+D 分离
+   ```
+
+3. **构建前端**
+   ```bash
+   cd ~/writing-assistant/frontend
+   npm run build
+   # build 产物在 dist/ 目录，由 nginx 托管
+   ```
+
+4. **验证服务**
+   ```bash
+   # 后端健康检查
+   curl http://localhost:9000/api/health
+   
+   # KnG 服务
+   curl http://localhost:50001/api/status
+   
+   # 前端
+   curl http://localhost:8000
+   ```
+
+### 关键注意事项
+
+1. **不要 kill 非 liubin 的进程**。服务器上其他人也在使用，操作前先 `ps aux | grep 进程名` 确认用户。
+2. **端口不能随意更改**。所有服务端口都配置了内网穿透，改端口会导致穿透失效。
+3. **模型 API key 已配置**在 `backend/.env` 中，包含 `LLM_API_KEY` 和 `MODEL_API_KEY`，key 失效时需更新。
+4. **Conda 环境**：使用 `conda activate writing` 激活 Python 环境（Python 3.11）。
+5. **前端托管**：由 nginx 在 8000 端口提供静态文件服务，build 产物在 `frontend/dist/`。
+6. **Screen 操作**：`screen -r 会话名` 进入，`Ctrl+A+D` 分离，`screen -ls` 列出所有会话。
+7. **GitHub 代理**：服务器已配置 git 全局代理（`http://127.0.0.1:7897`），通过 SSH RemoteForward 转发到本地 Clash。
+
+### 服务器目录结构
+
+```
+~/writing-assistant/
+├── backend/           # FastAPI 后端
+│   ├── app/           # 应用代码
+│   └── .env           # 环境变量（含 API key）
+├── frontend/          # React 前端
+│   ├── src/           # 源码
+│   └── dist/          # build 产物（nginx 托管）
+└── DEV_WORKFLOW.md    # 本文件
+```
