@@ -16,7 +16,10 @@ function App() {
   const [sessions, setSessions] = useState([])
 
   // 当前页面：'start' = 开始页面，'content' = 编辑页面
-  const [currentPage, setCurrentPage] = useState('start')
+  // 从 localStorage 恢复页面状态，默认 start
+  const [currentPage, setCurrentPage] = useState(() => {
+    return localStorage.getItem('currentPage') || 'start'
+  })
 
   // 存储每个会话的内容，键为会话ID
   const [sessionContents, setSessionContents] = useState({})
@@ -114,6 +117,9 @@ function App() {
       console.log('getArticle response:', articleResponse)
       if (articleResponse && articleResponse.article_content) {
         setCurrentSessionOutput(articleResponse.article_content)
+        // 会话有文章内容时自动切换到内容页
+        setCurrentPage('content')
+        localStorage.setItem('currentPage', 'content')
       } else {
         setCurrentSessionOutput('')
       }
@@ -283,7 +289,6 @@ function App() {
   const handleSessionChange = (session) => {
     setCurrentSession(session)
     localStorage.setItem('currentSessionId', session.id)
-    setCurrentPage('start')
   }
 
   // 处理文章内容更新
@@ -484,6 +489,7 @@ function App() {
 
         // 切换到内容页面
         setCurrentPage('content')
+        localStorage.setItem('currentPage', 'content')
 
       } else if (writingMode === 'reference') {
         // 参考写作：调用 /api/generate/reference-write
@@ -553,6 +559,7 @@ function App() {
 
         setCurrentSessionOutput(articleContent)
         setCurrentPage('content')
+        localStorage.setItem('currentPage', 'content')
       }
     } catch (error) {
       console.error('生成失败:', error)
