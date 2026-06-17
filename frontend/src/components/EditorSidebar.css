@@ -618,6 +618,89 @@
   color: #cf1322;
 }
 
+/* 模板选择器 */
+.template-selector-wrapper {
+  position: relative;
+}
+
+.template-select-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 13px;
+  color: #333;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.template-select-btn:hover {
+  border-color: #1890ff;
+  color: #1890ff;
+}
+
+.template-select-btn svg {
+  flex-shrink: 0;
+}
+
+.template-select-label {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.template-dropdown {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 4px;
+  min-width: 220px;
+  background: #fff;
+  border: 1px solid #e8ecef;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  z-index: 100;
+  overflow: hidden;
+}
+
+.template-dropdown-item {
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: background 0.15s;
+  border-bottom: 1px solid #f5f5f5;
+}
+
+.template-dropdown-item:last-child {
+  border-bottom: none;
+}
+
+.template-dropdown-item:hover {
+  background: #f0f8ff;
+}
+
+.template-dropdown-item.active {
+  background: #e6f7ff;
+}
+
+.template-dropdown-name {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: #333;
+}
+
+.template-dropdown-desc {
+  display: block;
+  font-size: 11px;
+  color: #999;
+  margin-top: 2px;
+}
+
 /* AI 修改对话框 */
 .ai-edit-dialog {
   width: 380px;

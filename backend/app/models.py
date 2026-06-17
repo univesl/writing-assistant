@@ -46,6 +46,19 @@ class Content(Base):
     session: Mapped["Session"] = relationship("Session", back_populates="contents")
 
 
+class Template(Base):
+    """导出模板（docx 格式，用于 pandoc --reference-doc）"""
+    __tablename__ = "templates"
+
+    template_id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)       # 模板名称
+    filename: Mapped[str] = mapped_column(String(512), nullable=False)    # 文件在 format/ 下的存储名
+    description: Mapped[str | None] = mapped_column(String(500), nullable=True, default="")  # 模板描述
+    is_default: Mapped[bool] = mapped_column(Integer, nullable=False, default=False)  # 是否为默认模板
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+
+
 class SessionFile(Base):
     """会话级别的文件（临时文件，会话删除时连带删除）"""
     __tablename__ = "session_files"

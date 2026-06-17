@@ -14,9 +14,33 @@ from .routers import write as write_router
 from .routers import content as content_router
 from .routers import upload as upload_router
 from .routers import generate as generate_router
+from .routers import templates as templates_router
 from .utils import err, ok, dt_str
+from .database import SessionLocal
 
 Base.metadata.create_all(bind=engine)
+
+# 初始化默认模板
+def init_default_template():
+    try:
+        db = SessionLocal()
+        from .models import Template
+        exists = db.query(Template).first()
+        if not exists:
+            t = Template(
+                name="默认公文模板",
+                filename="template.docx",
+                description="默认公文模板（仿宋_GB2312、黑体等规范字体字号）",
+                is_default=True,
+            )
+            db.add(t)
+            db.commit()
+            print("[init] 默认模板已初始化")
+        db.close()
+    except Exception as e:
+        print(f"[init] 初始化默认模板失败: {e}")
+
+init_default_template()
 
 app = FastAPI(title="AI Writing Assistant Backend", version="1.0.0")
 
@@ -33,6 +57,7 @@ app.include_router(write_router.router, prefix="/api")
 app.include_router(content_router.router, prefix="/api")
 app.include_router(upload_router.router, prefix="/api")
 app.include_router(generate_router.router, prefix="/api")
+app.include_router(templates_router.router, prefix="/api")
 
 @app.get("/api/health")
 def health():

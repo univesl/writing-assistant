@@ -15,6 +15,9 @@ function EditorSidebar({ currentSession, currentOutput, onArticleUpdate, onEdito
   const contentRef = useRef(null)
   const resizeRef = useRef(null)
   const isResizingRef = useRef(false)
+  const [templates, setTemplates] = useState([])
+  const [selectedTemplate, setSelectedTemplate] = useState('')
+  const [showTemplateMenu, setShowTemplateMenu] = useState(false)
 
   // AI 修改对话框状态
   const [showAIDialog, setShowAIDialog] = useState(false)
@@ -109,6 +112,24 @@ function EditorSidebar({ currentSession, currentOutput, onArticleUpdate, onEdito
     }
   }, [editorContent, onEditorContentChange])
 
+  // 加载模板列表
+  useEffect(() => {
+    const loadTemplates = async () => {
+      try {
+        const res = await fetch('/api/templates/list')
+        const json = await res.json()
+        if (json.code === 200 && json.data) {
+          setTemplates(json.data)
+          const defaultTpl = json.data.find(t => t.is_default)
+          if (defaultTpl) setSelectedTemplate(defaultTpl.filename)
+        }
+      } catch (e) {
+        console.error('加载模板列表失败:', e)
+      }
+    }
+    loadTemplates()
+  }, [])
+
   // 处理内容编辑
   const handleEditorChange = (e) => {
     setEditorContent(e.target.value)
@@ -181,7 +202,8 @@ function EditorSidebar({ currentSession, currentOutput, onArticleUpdate, onEdito
     if (!currentSession || !editorContent) return
     setIsExporting(true)
     try {
-      const referenceDoc = exportType === 'docx' ? 'template.docx' : null
+      // docx 导出时使用选中的模板，否则用默认
+      const referenceDoc = exportType === 'docx' ? (selectedTemplate || null) : null
       const response = await writeApi.exportDocument(currentSession.id, exportType, referenceDoc)
 
       let blob
@@ -732,6 +754,36 @@ function EditorSidebar({ currentSession, currentOutput, onArticleUpdate, onEdito
             )}
           </div>
           <div className="export-buttons">
+            {/* docx 模板选择 */}
+            <div className="template-selector-wrapper">
+              <button
+                className="template-select-btn"
+                onClick={() => setShowTemplateMenu(!showTemplateMenu)}
+                title="选择导出模板"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                </svg>
+                <span className="template-select-label">
+                  {templates.find(t => t.filename === selectedTemplate)?.name || '默认模板'}
+                </span>
+              </button>
+              {showTemplateMenu && (
+                <div className="template-dropdown">
+                  {templates.map(t => (
+                    <div
+                      key={t.template_id}
+                      className={`template-dropdown-item ${t.filename === selectedTemplate ? 'active' : ''}`}
+                      onClick={() => { setSelectedTemplate(t.filename); setShowTemplateMenu(false) }}
+                    >
+                      <span className="template-dropdown-name">{t.name}</span>
+                      {t.description && <span className="template-dropdown-desc">{t.description}</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
             <button
               className="export-btn export-md"
               onClick={() => handleExport('md')}

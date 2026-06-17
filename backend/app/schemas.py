@@ -112,6 +112,16 @@ class ReplyGenerationRequest(BaseModel):
     top_k: int = 3
 
 
+class TemplateOut(BaseModel):
+    """模板列表输出"""
+    template_id: int
+    name: str
+    filename: str
+    description: str
+    is_default: bool
+    created_at: str
+
+
 # 参考生成请求
 class ReferenceGenerationRequest(BaseModel):
     session_id: int
@@ -122,6 +132,16 @@ class ReferenceGenerationRequest(BaseModel):
     model_name: str = "qwen2.5-72b"
     use_knowledge_base: bool = True
     top_k: int = 3
+
+
+class TemplateOut(BaseModel):
+    """模板列表输出"""
+    template_id: int
+    name: str
+    filename: str
+    description: str
+    is_default: bool
+    created_at: str
 
 
 # 参考写作请求（新增三模式）
@@ -136,3 +156,13 @@ class ReferenceWriteRequest(BaseModel):
     model_name: str = "qwen2.5-72b"
     use_knowledge_base: bool = True
     top_k: int = 3
+
+
+class TemplateOut(BaseModel):
+    """模板列表输出"""
+    template_id: int
+    name: str
+    filename: str
+    description: str
+    is_default: bool
+    created_at: str
