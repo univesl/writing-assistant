@@ -89,6 +89,8 @@ def delete_template(template_id: int, db: OrmSession = Depends(get_db)):
     if not t:
         return err(404, "模板不存在")
 
+    was_default = t.is_default
+
     # 删除文件
     file_path = os.path.join(TEMPLATES_DIR, t.filename)
     if os.path.exists(file_path):
@@ -97,6 +99,14 @@ def delete_template(template_id: int, db: OrmSession = Depends(get_db)):
     # 删除数据库记录
     db.delete(t)
     db.commit()
+
+    # 如果删除的是默认模板，自动将第一个可用模板设为默认
+    if was_default:
+        first = db.query(Template).first()
+        if first:
+            first.is_default = True
+            db.commit()
+            print(f"[templates] 默认模板已删除，自动切换到: {first.filename}")
 
     return ok(None, "模板删除成功")
 
