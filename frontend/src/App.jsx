@@ -7,7 +7,6 @@ import EditorSidebar from './components/EditorSidebar'
 import StartPage from './components/StartPage'
 import { sessionApi } from './api/sessionApi'
 import { writeApi } from './api/writeApi'
-import { generateApi } from './api/generateApi'
 
 function App() {
   // 当前选中的会话ID
@@ -382,37 +381,14 @@ function App() {
       writeApi.saveContent(currentSession.id, userDisplayContent, writingMode === 'quick' ? 'quick' : 'reference', 'chat', 'user').catch(() => {})
 
       if (writingMode === 'quick') {
-        // 快速写作：先调用知识库检索，再调用 /api/write/quick
-        let ragContent = ''
-        let ragReferences = []
+        // RAG 统一由后端在 /api/write/quick 中自动做，前端不预调用
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 120000)  // 2 分钟超时
 
-        try {
-          const topic = quickRequirements && quickRequirements.trim()
-            ? `${quickRequirements}`
-            : (templateType === 'notice' ? '通知公文' :
-               templateType === 'regulation' ? '规章制度' :
-               templateType === 'speech' ? '讲话稿' : '文章')
-
-          const generateResult = await generateApi.generateDocument(
-            topic,
-            quickRequirements || '',
-            DEFAULT_MODEL,
-            true,
-            3
-          )
-
-          if (generateResult) {
-            ragContent = generateResult.content || ''
-            ragReferences = generateResult.references || []
-          }
-        } catch (error) {
-          console.error('知识库生成失败:', error)
-        }
-
-        // 调用 /api/write/quick
         const response = await fetch('/api/write/quick', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
           body: JSON.stringify({
             session_id: currentSession.id,
             mode: 'quick',
@@ -420,8 +396,8 @@ function App() {
             user_requirements: quickRequirements || '',
             reference_content: '',
             reference_filename: '',
-            rag_content: ragContent,
-            rag_references: ragReferences,
+            rag_content: '',
+            rag_references: [],
             quotes: [],
             article_content: '',
             extracted_fields: {},
@@ -429,6 +405,7 @@ function App() {
             llm_model: 'qwen'
           })
         })
+        clearTimeout(timeoutId)
 
         if (response.body && response.body.getReader) {
           const reader = response.body.getReader()

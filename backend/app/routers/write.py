@@ -1,6 +1,5 @@
 import json
 import asyncio
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
@@ -12,6 +11,7 @@ from ..schemas import WriteQuickIn, WriteSaveIn
 from ..utils import ok, err
 from ..services.llm import stream_text_from_llm
 from ..services.prompt_builder import build_prompt
+from ..services.kng_rag_service import get_kng_rag_service
 
 router = APIRouter(prefix="/write", tags=["write"])
 
@@ -22,20 +22,39 @@ def sse_pack(content: str, finish: bool) -> str:
 
 @router.post("/quick")
 async def write_quick(payload: WriteQuickIn, db: OrmSession = Depends(get_db)):
-    print("[DEBUG] 前端传入的快速写作数据:", payload.dict())
-    
     session = db.get(SessionModel, payload.session_id)
     if not session:
-        print(f"[DEBUG] 会话ID {payload.session_id} 不存在，创建新会话")
         session = SessionModel(session_name="新会话")
         db.add(session)
         db.commit()
         db.refresh(session)
         payload.session_id = session.session_id
-    else:
-        print(f"[DEBUG] 会话ID {payload.session_id} 存在")
 
-    # 使用 PromptBuilder 统一构建 prompt
+    # quick 模式且未提供 rag_content 时，自动做 RAG 检索
+    rag_content = payload.rag_content
+    rag_references = payload.rag_references
+    if payload.mode == "quick" and not rag_content:
+        try:
+            service = get_kng_rag_service()
+            if service.is_ready():
+                topic = payload.user_requirements or (
+                    "通知公文" if payload.style == "notice" else
+                    "规章制度" if payload.style == "regulation" else
+                    "讲话稿" if payload.style == "speech" else
+                    "文章"
+                )
+                result = service.retrieve_for_document_generation(
+                    topic=topic,
+                    requirements=payload.user_requirements or "",
+                    mode="local",
+                )
+                if result.get("content"):
+                    rag_content = result["content"]
+                    rag_references = result.get("references", [])
+                    print(f"[write] RAG 检索完成，内容长度: {len(rag_content)}")
+        except Exception as e:
+            print(f"[write] RAG 检索失败（跳过）: {e}")
+
     messages = build_prompt(
         mode=payload.mode,
         style=payload.style,
@@ -43,32 +62,25 @@ async def write_quick(payload: WriteQuickIn, db: OrmSession = Depends(get_db)):
             "user_requirements": payload.user_requirements,
             "reference_content": payload.reference_content,
             "reference_filename": payload.reference_filename,
-            "rag_content": payload.rag_content,
-            "rag_references": payload.rag_references,
+            "rag_content": rag_content,
+            "rag_references": rag_references,
             "quotes": payload.quotes,
             "article_content": payload.article_content,
             "extracted_fields": payload.extracted_fields,
             "style": payload.style,
         },
     )
-    
+
     llm_model = payload.llm_model or "xhang"
-    print(f"[DEBUG] 使用的LLM模型: {llm_model}")
-    print(f"[DEBUG] 构建的 system prompt 长度: {len(messages[0]['content'])}")
-    print(f"[DEBUG] 构建的 user prompt 长度: {len(messages[1]['content'])}")
+    print(f"[write] mode={payload.mode}, model={llm_model}, prompt_len={len(messages[0]['content'])}/{len(messages[1]['content'])}")
 
     async def gen():
         full_text = ""
-        chunk_count = 0
         async for chunk in stream_text_from_llm(messages, llm_model=llm_model):
-            chunk_count += 1
-            print(f"[DEBUG] yield chunk #{chunk_count}: {chunk[:50] if len(chunk) > 50 else chunk}...")
             full_text += chunk
             yield sse_pack(chunk, False)
-            await asyncio.sleep(0.01)
-        
-        print(f"[DEBUG] LLM完整回复：{full_text}")
-        print(f"[DEBUG] 总共 yield 了 {chunk_count} 个 chunk")
+
+        print(f"[write] LLM 生成完成，总长度: {len(full_text)}")
         yield sse_pack("", True)
 
     headers = {
@@ -82,22 +94,13 @@ async def write_quick(payload: WriteQuickIn, db: OrmSession = Depends(get_db)):
 
 @router.post("/save")
 def write_save(payload: WriteSaveIn, db: OrmSession = Depends(get_db)):
-    # 打印前端传入的完整数据
-    print("[DEBUG] 前端传入的内容保存数据:", payload.dict())
-    
-    # 检查会话是否存在，如果不存在则创建新会话
     session = db.get(SessionModel, payload.session_id)
     if not session:
-        print(f"[DEBUG] 会话ID {payload.session_id} 不存在，创建新会话")
-        # 创建新会话
         session = SessionModel(session_name="新会话")
         db.add(session)
         db.commit()
         db.refresh(session)
-        # 更新payload中的session_id
         payload.session_id = session.session_id
-    else:
-        print(f"[DEBUG] 会话ID {payload.session_id} 存在")
 
     c = ContentModel(
         session_id=payload.session_id,
