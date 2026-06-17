@@ -701,6 +701,181 @@
   margin-top: 2px;
 }
 
+.template-dropdown-badge {
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: #52c41a;
+  color: #fff;
+  font-size: 10px;
+  margin-left: auto;
+}
+
+.template-dropdown-divider {
+  height: 1px;
+  background: #f0f0f0;
+  margin: 4px 0;
+}
+
+/* 模板管理对话框 */
+.template-manager-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.4);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.template-manager-dialog {
+  background: #fff;
+  border-radius: 12px;
+  width: 480px;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.15);
+}
+
+.template-manager-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid #e8ecef;
+}
+
+.template-manager-dialog-header h4 {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.template-mgr-close {
+  background: none;
+  border: none;
+  font-size: 22px;
+  color: #999;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.template-mgr-close:hover { color: #333; }
+
+.template-manager-dialog-body {
+  padding: 16px 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.template-upload-btn {
+  display: block;
+  width: 100%;
+  padding: 10px 18px;
+  border: 1px dashed #1890ff;
+  border-radius: 8px;
+  background: #e6f7ff;
+  color: #1890ff;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: center;
+  margin-bottom: 14px;
+}
+
+.template-upload-btn:hover {
+  background: #bae7ff;
+}
+
+.template-upload-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.template-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.template-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: #fff;
+  border: 1px solid #e8ecef;
+  border-radius: 8px;
+}
+
+.template-list-item.default {
+  border-color: #b7eb8f;
+  background: #f6ffed;
+}
+
+.template-list-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.template-list-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: #333;
+}
+
+.template-list-badge {
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: #52c41a;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.template-list-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.template-action-btn {
+  padding: 4px 10px;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: #fff;
+}
+
+.template-action-btn.set-default {
+  color: #1890ff;
+  border-color: #91d5ff;
+}
+
+.template-action-btn.set-default:hover {
+  background: #e6f7ff;
+}
+
+.template-action-btn.delete {
+  color: #ff4d4f;
+  border-color: #ffccc7;
+}
+
+.template-action-btn.delete:hover {
+  background: #fff2f0;
+}
+
+.template-empty {
+  text-align: center;
+  padding: 24px;
+  color: #999;
+  font-size: 13px;
+}
+
 /* AI 修改对话框 */
 .ai-edit-dialog {
   width: 380px;

@@ -253,6 +253,155 @@
   margin-top: 16px;
 }
 
+/* 模板管理 */
+.template-manager-section {
+  margin-bottom: 24px;
+}
+
+.template-manager-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.template-mgr-btn {
+  padding: 6px 14px;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  background: #fff;
+  color: #666;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.template-mgr-btn:hover {
+  border-color: #1890ff;
+  color: #1890ff;
+}
+
+.template-manager-panel {
+  border: 1px solid #e8ecef;
+  border-radius: 10px;
+  padding: 14px;
+  background: #fafafa;
+}
+
+.template-upload-area {
+  margin-bottom: 12px;
+}
+
+.template-upload-btn {
+  padding: 8px 18px;
+  border: 1px dashed #1890ff;
+  border-radius: 6px;
+  background: #e6f7ff;
+  color: #1890ff;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.template-upload-btn:hover {
+  background: #bae7ff;
+}
+
+.template-upload-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.template-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.template-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid #e8ecef;
+  border-radius: 8px;
+  transition: border-color 0.2s;
+}
+
+.template-list-item.default {
+  border-color: #b7eb8f;
+  background: #f6ffed;
+}
+
+.template-list-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.template-list-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: #333;
+}
+
+.template-list-desc {
+  font-size: 12px;
+  color: #999;
+}
+
+.template-list-badge {
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: #52c41a;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.template-list-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.template-action-btn {
+  padding: 4px 10px;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: #fff;
+}
+
+.template-action-btn.set-default {
+  color: #1890ff;
+  border-color: #91d5ff;
+}
+
+.template-action-btn.set-default:hover {
+  background: #e6f7ff;
+}
+
+.template-action-btn.delete {
+  color: #ff4d4f;
+  border-color: #ffccc7;
+}
+
+.template-action-btn.delete:hover {
+  background: #fff2f0;
+}
+
+.template-empty {
+  text-align: center;
+  padding: 20px;
+  color: #999;
+  font-size: 13px;
+}
+
 .start-generate-btn {
   width: 100%;
   padding: 14px 32px;

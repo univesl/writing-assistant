@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import './StartPage.css'
 
 function StartPage({ currentSession, onGenerate, isGenerating }) {
@@ -10,6 +10,24 @@ function StartPage({ currentSession, onGenerate, isGenerating }) {
   const [referenceWriteType, setReferenceWriteType] = useState('general')
   const [referenceRequirements, setReferenceRequirements] = useState('')
   const fileInputRef = useRef(null)
+  const templateFileInputRef = useRef(null)
+
+  // 模板管理
+  const [templates, setTemplates] = useState([])
+  const [showTemplateManager, setShowTemplateManager] = useState(false)
+  const [isUploadingTemplate, setIsUploadingTemplate] = useState(false)
+
+  // 加载模板列表
+  useEffect(() => {
+    const loadTemplates = async () => {
+      try {
+        const res = await fetch('/api/templates/list')
+        const json = await res.json()
+        if (json.code === 200 && json.data) setTemplates(json.data)
+      } catch (e) { console.error('加载模板失败:', e) }
+    }
+    loadTemplates()
+  }, [])
 
   const handleFileChange = async (e) => {
     const file = e.target.files[0]
@@ -42,6 +60,53 @@ function StartPage({ currentSession, onGenerate, isGenerating }) {
       referenceWriteType,
       referenceRequirements,
     })
+  }
+
+  // 上传模板
+  const handleUploadTemplate = async (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    setIsUploadingTemplate(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('name', file.name.replace('.docx', ''))
+      const res = await fetch('/api/templates/upload', { method: 'POST', body: formData })
+      const json = await res.json()
+      if (json.code === 200) {
+        // 重新加载模板列表
+        const listRes = await fetch('/api/templates/list')
+        const listJson = await listRes.json()
+        if (listJson.code === 200 && listJson.data) setTemplates(listJson.data)
+      }
+    } catch (e) { console.error('上传模板失败:', e) }
+    setIsUploadingTemplate(false)
+    e.target.value = ''
+  }
+
+  // 设置默认模板
+  const handleSetDefault = async (templateId) => {
+    try {
+      const res = await fetch(`/api/templates/${templateId}/set-default`, { method: 'POST' })
+      const json = await res.json()
+      if (json.code === 200) {
+        const listRes = await fetch('/api/templates/list')
+        const listJson = await listRes.json()
+        if (listJson.code === 200 && listJson.data) setTemplates(listJson.data)
+      }
+    } catch (e) { console.error('设置默认模板失败:', e) }
+  }
+
+  // 删除模板
+  const handleDeleteTemplate = async (templateId) => {
+    if (!confirm('确定删除此模板？')) return
+    try {
+      const res = await fetch(`/api/templates/delete/${templateId}`, { method: 'DELETE' })
+      const json = await res.json()
+      if (json.code === 200) {
+        setTemplates(prev => prev.filter(t => t.template_id !== templateId))
+      }
+    } catch (e) { console.error('删除模板失败:', e) }
   }
 
   const canGenerate = () => {
@@ -214,6 +279,57 @@ function StartPage({ currentSession, onGenerate, isGenerating }) {
             </section>
           </>
         )}
+
+        {/* 模板管理入口 */}
+        <div className="start-section template-manager-section">
+          <div className="template-manager-header">
+            <h2 className="section-title">导出模板</h2>
+            <button className="template-mgr-btn" onClick={() => setShowTemplateManager(!showTemplateManager)}>
+              {showTemplateManager ? '收起' : '管理模板'}
+            </button>
+          </div>
+          {showTemplateManager && (
+            <div className="template-manager-panel">
+              <div className="template-upload-area">
+                <button
+                  className="template-upload-btn"
+                  onClick={() => templateFileInputRef.current?.click()}
+                  disabled={isUploadingTemplate}
+                >
+                  {isUploadingTemplate ? '上传中...' : '上传 .docx 模板'}
+                </button>
+                <input
+                  type="file"
+                  ref={templateFileInputRef}
+                  onChange={handleUploadTemplate}
+                  accept=".docx"
+                  style={{ display: 'none' }}
+                />
+              </div>
+              {templates.length > 0 ? (
+                <div className="template-list">
+                  {templates.map(t => (
+                    <div key={t.template_id} className={`template-list-item ${t.is_default ? 'default' : ''}`}>
+                      <div className="template-list-info">
+                        <span className="template-list-name">{t.name}</span>
+                        {t.description && <span className="template-list-desc">{t.description}</span>}
+                        {t.is_default && <span className="template-list-badge">默认</span>}
+                      </div>
+                      <div className="template-list-actions">
+                        {!t.is_default && (
+                          <button className="template-action-btn set-default" onClick={() => handleSetDefault(t.template_id)}>设为默认</button>
+                        )}
+                        <button className="template-action-btn delete" onClick={() => handleDeleteTemplate(t.template_id)}>删除</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="template-empty">暂无模板，上传 .docx 文件作为导出模板</div>
+              )}
+            </div>
+          )}
+        </div>
 
         {/* 生成按钮 */}
         <div className="start-page-footer">

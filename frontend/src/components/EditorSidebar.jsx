@@ -18,6 +18,9 @@ function EditorSidebar({ currentSession, currentOutput, onArticleUpdate, onEdito
   const [templates, setTemplates] = useState([])
   const [selectedTemplate, setSelectedTemplate] = useState('')
   const [showTemplateMenu, setShowTemplateMenu] = useState(false)
+  const [showTemplateManager, setShowTemplateManager] = useState(false)
+  const [isUploadingTemplate, setIsUploadingTemplate] = useState(false)
+  const templateFileInputRef = useRef(null)
 
   // AI 修改对话框状态
   const [showAIDialog, setShowAIDialog] = useState(false)
@@ -129,6 +132,45 @@ function EditorSidebar({ currentSession, currentOutput, onArticleUpdate, onEdito
     }
     loadTemplates()
   }, [])
+
+  // 模板管理操作
+  const reloadTemplates = async () => {
+    try {
+      const res = await fetch('/api/templates/list')
+      const json = await res.json()
+      if (json.code === 200 && json.data) setTemplates(json.data)
+    } catch (e) { console.error('加载模板失败:', e) }
+  }
+
+  const handleUploadTemplate = async (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    setIsUploadingTemplate(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('name', file.name.replace('.docx', ''))
+      await fetch('/api/templates/upload', { method: 'POST', body: formData })
+      await reloadTemplates()
+    } catch (e) { console.error('上传模板失败:', e) }
+    setIsUploadingTemplate(false)
+    e.target.value = ''
+  }
+
+  const handleSetDefault = async (templateId) => {
+    try {
+      await fetch(`/api/templates/${templateId}/set-default`, { method: 'POST' })
+      await reloadTemplates()
+    } catch (e) { console.error('设置默认模板失败:', e) }
+  }
+
+  const handleDeleteTemplate = async (templateId) => {
+    if (!confirm('确定删除此模板？')) return
+    try {
+      await fetch(`/api/templates/delete/${templateId}`, { method: 'DELETE' })
+      setTemplates(prev => prev.filter(t => t.template_id !== templateId))
+    } catch (e) { console.error('删除模板失败:', e) }
+  }
 
   // 处理内容编辑
   const handleEditorChange = (e) => {
@@ -753,6 +795,49 @@ function EditorSidebar({ currentSession, currentOutput, onArticleUpdate, onEdito
               <span>{tableOfContents.length} 标题</span>
             )}
           </div>
+
+          {/* 模板管理对话框 */}
+          {showTemplateManager && (
+            <div className="template-manager-overlay" onClick={() => setShowTemplateManager(false)}>
+              <div className="template-manager-dialog" onClick={e => e.stopPropagation()}>
+                <div className="template-manager-dialog-header">
+                  <h4>模板管理</h4>
+                  <button className="template-mgr-close" onClick={() => setShowTemplateManager(false)}>×</button>
+                </div>
+                <div className="template-manager-dialog-body">
+                  <button
+                    className="template-upload-btn"
+                    onClick={() => templateFileInputRef.current?.click()}
+                    disabled={isUploadingTemplate}
+                  >
+                    {isUploadingTemplate ? '上传中...' : '上传 .docx 模板'}
+                  </button>
+                  <input type="file" ref={templateFileInputRef} onChange={handleUploadTemplate} accept=".docx" style={{ display: 'none' }} />
+                  {templates.length > 0 ? (
+                    <div className="template-list">
+                      {templates.map(t => (
+                        <div key={t.template_id} className={`template-list-item ${t.is_default ? 'default' : ''}`}>
+                          <div className="template-list-info">
+                            <span className="template-list-name">{t.name}</span>
+                            {t.is_default && <span className="template-list-badge">默认</span>}
+                          </div>
+                          <div className="template-list-actions">
+                            {!t.is_default && (
+                              <button className="template-action-btn set-default" onClick={() => handleSetDefault(t.template_id)}>设为默认</button>
+                            )}
+                            <button className="template-action-btn delete" onClick={() => handleDeleteTemplate(t.template_id)}>删除</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="template-empty">暂无模板</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="export-buttons">
             {/* docx 模板选择 */}
             <div className="template-selector-wrapper">
@@ -779,8 +864,16 @@ function EditorSidebar({ currentSession, currentOutput, onArticleUpdate, onEdito
                     >
                       <span className="template-dropdown-name">{t.name}</span>
                       {t.description && <span className="template-dropdown-desc">{t.description}</span>}
+                      {t.is_default && <span className="template-dropdown-badge">默认</span>}
                     </div>
                   ))}
+                  <div className="template-dropdown-divider"></div>
+                  <div
+                    className="template-dropdown-item manage"
+                    onClick={() => { setShowTemplateMenu(false); setShowTemplateManager(true) }}
+                  >
+                    <span className="template-dropdown-name">管理模板...</span>
+                  </div>
                 </div>
               )}
             </div>
