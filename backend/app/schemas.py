@@ -24,6 +24,7 @@ class WriteQuickIn(BaseModel):
     extracted_fields: dict = {}
     model_type: Optional[Literal["general", "creative"]] = "general"
     llm_model: Optional[Literal["xhang", "qwen"]] = "xhang"
+    use_rag: bool = False
 
 
 class WriteSaveIn(BaseModel):

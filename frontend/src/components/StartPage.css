@@ -402,6 +402,38 @@
   font-size: 13px;
 }
 
+/* RAG 检索开关 */
+.rag-toggle {
+  margin: 16px 0;
+}
+
+.rag-toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.rag-toggle-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: #1890ff;
+  cursor: pointer;
+}
+
+.rag-toggle-text {
+  font-size: 14px;
+  font-weight: 500;
+  color: #333;
+}
+
+.rag-toggle-hint {
+  font-size: 12px;
+  color: #999;
+  margin-left: 4px;
+}
+
 .start-generate-btn {
   width: 100%;
   padding: 14px 32px;

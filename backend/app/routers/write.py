@@ -30,10 +30,10 @@ async def write_quick(payload: WriteQuickIn, db: OrmSession = Depends(get_db)):
         db.refresh(session)
         payload.session_id = session.session_id
 
-    # quick 模式且未提供 rag_content 时，自动做 RAG 检索
+    # 仅当用户勾选了"启用知识库检索"且未提供 rag_content 时，才做 RAG 检索
     rag_content = payload.rag_content
     rag_references = payload.rag_references
-    if payload.mode == "quick" and not rag_content:
+    if payload.use_rag and not rag_content:
         try:
             service = get_kng_rag_service()
             if service.is_ready():

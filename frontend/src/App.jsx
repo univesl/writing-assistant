@@ -15,10 +15,8 @@ function App() {
   const [sessions, setSessions] = useState([])
 
   // 当前页面：'start' = 开始页面，'content' = 编辑页面
-  // 从 localStorage 恢复页面状态，默认 start
-  const [currentPage, setCurrentPage] = useState(() => {
-    return localStorage.getItem('currentPage') || 'start'
-  })
+  // 不从 localStorage 恢复，统一从 loadSessionContent 判断
+  const [currentPage, setCurrentPage] = useState('start')
 
   // 存储每个会话的内容，键为会话ID
   const [sessionContents, setSessionContents] = useState({})
@@ -110,15 +108,17 @@ function App() {
   // 加载会话内容
   const loadSessionContent = async (sessionId) => {
     console.log('loadSessionContent called with sessionId:', sessionId)
+    // 先回到开始页面，等查完再确定是否跳转到内容页
+    setCurrentPage('start')
     try {
       console.log('Calling getArticle API with sessionId:', sessionId)
       const articleResponse = await writeApi.getArticle(sessionId)
       console.log('getArticle response:', articleResponse)
-      if (articleResponse && articleResponse.article_content) {
-        setCurrentSessionOutput(articleResponse.article_content)
-        // 会话有文章内容时自动切换到内容页
+      const articleText = articleResponse?.article_content || ''
+      if (articleText.trim().length >= 10) {
+        setCurrentSessionOutput(articleText)
+        // 会话有文章内容（至少 10 个有效字符）时切换到内容页
         setCurrentPage('content')
-        localStorage.setItem('currentPage', 'content')
       } else {
         setCurrentSessionOutput('')
       }
@@ -288,6 +288,8 @@ function App() {
   const handleSessionChange = (session) => {
     setCurrentSession(session)
     localStorage.setItem('currentSessionId', session.id)
+    // 切换会话时立即回到开始页面，等 loadSessionContent 确定有无内容
+    setCurrentPage('start')
   }
 
   // 处理文章内容更新
@@ -343,7 +345,7 @@ function App() {
 
     try {
       const DEFAULT_MODEL = 'Qwen2.5-72B-Instruct'
-      const { writingMode, templateType, quickRequirements, referenceDocuments, referenceWriteType, referenceRequirements } = config
+      const { writingMode, templateType, quickRequirements, referenceDocuments, referenceWriteType, referenceRequirements, useRag } = config
 
       // 构建用户显示内容
       let userDisplayContent = ''
@@ -402,7 +404,8 @@ function App() {
             article_content: '',
             extracted_fields: {},
             model_type: 'general',
-            llm_model: 'qwen'
+            llm_model: 'qwen',
+            use_rag: useRag || false,
           })
         })
         clearTimeout(timeoutId)

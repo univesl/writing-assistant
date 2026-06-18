@@ -9,6 +9,7 @@ function StartPage({ currentSession, onGenerate, isGenerating }) {
   const [referenceDocument, setReferenceDocument] = useState(null)
   const [referenceWriteType, setReferenceWriteType] = useState('general')
   const [referenceRequirements, setReferenceRequirements] = useState('')
+  const [useRag, setUseRag] = useState(false)
   const fileInputRef = useRef(null)
   const templateFileInputRef = useRef(null)
 
@@ -59,6 +60,7 @@ function StartPage({ currentSession, onGenerate, isGenerating }) {
       referenceDocuments,
       referenceWriteType,
       referenceRequirements,
+      useRag,
     })
   }
 
@@ -330,6 +332,22 @@ function StartPage({ currentSession, onGenerate, isGenerating }) {
             </div>
           )}
         </div>
+
+        {/* 知识库检索开关 */}
+        {writingMode === 'quick' && (
+          <div className="rag-toggle">
+            <label className="rag-toggle-label">
+              <input
+                type="checkbox"
+                checked={useRag}
+                onChange={(e) => setUseRag(e.target.checked)}
+                disabled={isGenerating}
+              />
+              <span className="rag-toggle-text">启用知识库检索</span>
+              <span className="rag-toggle-hint">勾选后生成时参考知识库内容，响应时间可能增加</span>
+            </label>
+          </div>
+        )}
 
         {/* 生成按钮 */}
         <div className="start-page-footer">

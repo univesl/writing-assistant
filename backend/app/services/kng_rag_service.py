@@ -79,7 +79,7 @@ class KnGRAGService:
         
         try:
             api_start = time.time()
-            response = requests.post(url, json=payload, timeout=60)
+            response = requests.post(url, json=payload, timeout=15)
             api_time = time.time() - api_start
             print(f"[KnG RAG] API请求耗时: {api_time:.2f}s")
             

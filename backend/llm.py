@@ -35,7 +35,9 @@ class LLMAPIClient:
         self.model_name = LLM_MODEL_NAME
         self.client = OpenAI(
             api_key=self.api_key,
-            base_url=self.api_url
+            base_url=self.api_url,
+            timeout=30.0,
+            max_retries=0,
         )
         logger.info(f"LLM客户端初始化完成，API地址: {self.api_url}")
     
