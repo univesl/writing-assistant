@@ -63,4 +63,8 @@ Thumbs.db
 *.tmp
 *.temp
 .temp/*
-.tmp/*DEV_WORKFLOW.md
+
+# Local-only docs
+DEV_WORKFLOW.md
+DEPLOYMENT.md
+operation.md

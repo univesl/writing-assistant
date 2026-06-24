@@ -465,12 +465,10 @@ function App() {
             await writeApi.saveContent(currentSession.id, summaryContent, 'quick', 'chat', 'assistant')
 
             setCurrentSessionOutput(articleContent)
+            setCurrentPage('content')
           }
         }
 
-        // 切换到内容页面
-        setCurrentPage('content')
-        localStorage.setItem('currentPage', 'content')
 
       } else if (writingMode === 'reference') {
         // 参考写作：调用 /api/generate/reference-write
@@ -549,8 +547,9 @@ function App() {
         await writeApi.saveContent(currentSession.id, summaryContent, 'reference', 'chat', 'assistant')
 
         setCurrentSessionOutput(articleContent)
-        setCurrentPage('content')
-        localStorage.setItem('currentPage', 'content')
+        if (articleContent) {
+          setCurrentPage('content')
+        }
       }
     } catch (error) {
       console.error('生成失败:', error)
