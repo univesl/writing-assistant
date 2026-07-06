@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import './EditorSidebar.css'
 import { writeApi } from '../api/writeApi'
+import { appendSseChunk, extractArticlePreview, parseGeneratedOutput } from '../utils/generatedOutput'
 
 function EditorSidebar({ currentSession, currentOutput, onArticleUpdate, onEditorContentChange }) {
   const [editorContent, setEditorContent] = useState('')
@@ -31,19 +32,11 @@ function EditorSidebar({ currentSession, currentOutput, onArticleUpdate, onEdito
   const selectionTimeoutRef = useRef(null)
   const previewRef = useRef(null)
   const aiDialogRef = useRef(null)
+  const currentSessionIdRef = useRef(currentSession?.id || null)
 
-  // 辅助函数：标准化文本，去除Markdown标记以便匹配
-  const normalizeTextForMatching = (text) => {
-    return text
-      .replace(/\*\*(.+?)\*\*/g, '$1')  // 去除粗体
-      .replace(/\*(.+?)\*/g, '$1')      // 去除斜体
-      .replace(/`([^`]+)`/g, '$1')       // 去除行内代码
-      .replace(/~~(.+?)~~/g, '$1')       // 去除删除线
-      .replace(/^#+\s*/gm, '')          // 去除标题标记
-      .replace(/[\[\]()]/g, '')        // 去除链接语法符号
-      .replace(/\s+/g, ' ')             // 标准化空白
-      .trim()
-  }
+  useEffect(() => {
+    currentSessionIdRef.current = currentSession?.id || null
+  }, [currentSession?.id])
 
   // 生成目录
   const generateTableOfContents = (content) => {
@@ -383,6 +376,7 @@ function EditorSidebar({ currentSession, currentOutput, onArticleUpdate, onEdito
     if (!selectedText || !aiEditRequest.trim() || !currentSession) return
 
     setIsAiEditing(true)
+    const editSessionId = currentSession.id
     try {
       const articleContent = editorContent || currentOutput || ''
 
@@ -390,7 +384,7 @@ function EditorSidebar({ currentSession, currentOutput, onArticleUpdate, onEdito
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          session_id: currentSession.id,
+          session_id: editSessionId,
           mode: 'edit',
           style: 'general',
           user_requirements: aiEditRequest.trim(),
@@ -416,35 +410,22 @@ function EditorSidebar({ currentSession, currentOutput, onArticleUpdate, onEdito
           const { done, value } = await reader.read()
           if (done) break
 
-          buffer += decoder.decode(value, { stream: true })
-          const events = buffer.split('\n\n')
-          buffer = events.pop() || ''
+          const parsed = appendSseChunk(buffer, output, value, decoder)
+          buffer = parsed.buffer
+          output = parsed.output
 
-          for (const event of events) {
-            if (event.startsWith('data:')) {
-              try {
-                const dataStr = event.slice(5).trim()
-                if (dataStr) {
-                  const data = JSON.parse(dataStr)
-                  if (data.content) {
-                    output += data.content
-                  }
-                }
-              } catch (e) { }
-            }
+          const liveArticle = extractArticlePreview(output)
+          if (liveArticle && editSessionId === currentSessionIdRef.current && onArticleUpdate) {
+            onArticleUpdate(editSessionId, liveArticle, { persist: false })
           }
         }
 
         if (output) {
-          let articleResult = output
-          const articleMatch = output.match(/---ARTICLE---\n?([\s\S]*?)(?=---SUMMARY---|$)/)
-          if (articleMatch) {
-            articleResult = articleMatch[1].trim()
-          }
+          const { articleContent: articleResult } = parseGeneratedOutput(output, '已完成修改')
 
-          await writeApi.saveArticle(currentSession.id, articleResult)
-          if (onArticleUpdate) {
-            onArticleUpdate(currentSession.id, articleResult)
+          await writeApi.saveArticle(editSessionId, articleResult)
+          if (onArticleUpdate && editSessionId === currentSessionIdRef.current) {
+            onArticleUpdate(editSessionId, articleResult, { persist: false })
           }
         }
       }
@@ -595,7 +576,7 @@ function EditorSidebar({ currentSession, currentOutput, onArticleUpdate, onEdito
         </div>
         {tableOfContents.length > 0 ? (
           <ul className="toc-list">
-            {tableOfContents.map((item, index) => (
+            {tableOfContents.map((item) => (
               <li
                 key={item.id}
                 className={`toc-item level-${item.level} ${item.isMainTitle ? 'toc-main-title' : ''}`}

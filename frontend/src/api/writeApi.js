@@ -74,13 +74,13 @@ export const writeMock = {
     })
   },
   
-  saveContent: async (sessionId, content, contentType) => {
+  saveContent: async () => {
     return {
       content_id: Date.now()
     }
   },
   
-  getSessionContent: async (sessionId) => {
+  getSessionContent: async () => {
     return [
       {
         content_id: 1,

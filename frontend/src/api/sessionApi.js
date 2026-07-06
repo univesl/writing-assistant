@@ -40,12 +40,12 @@ export const sessionMock = {
   },
   
   // 删除会话
-  deleteSession: async (sessionId) => {
+  deleteSession: async () => {
     return null
   },
   
   // 重命名会话
-  renameSession: async (sessionId, sessionName) => {
+  renameSession: async () => {
     return null
   }
 }

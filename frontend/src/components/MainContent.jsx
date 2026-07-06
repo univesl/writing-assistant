@@ -1,22 +1,27 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { writeApi } from '../api/writeApi'
+import { appendSseChunk, extractArticlePreview, parseGeneratedOutput } from '../utils/generatedOutput'
 
 function MainContent({ currentSession, editorContent, chatHistory, onArticleUpdate, onChatHistoryUpdate }) {
   const [isGenerating, setIsGenerating] = useState(false)
   const [chatInput, setChatInput] = useState('')
   const [displayChatHistory, setDisplayChatHistory] = useState([])
+  const currentSessionId = currentSession?.id || null
+  const currentSessionIdRef = useRef(currentSession?.id || null)
 
   const getArticleContent = () => {
     return editorContent || ''
   }
 
   useEffect(() => {
+    currentSessionIdRef.current = currentSessionId
+
     if (chatHistory && chatHistory.length > 0) {
       setDisplayChatHistory(chatHistory)
     } else {
       setDisplayChatHistory([])
     }
-  }, [chatHistory])
+  }, [chatHistory, currentSessionId])
 
   const handleEditSubmit = async () => {
     if (!currentSession || !chatInput.trim()) {
@@ -30,6 +35,7 @@ function MainContent({ currentSession, editorContent, chatHistory, onArticleUpda
     }
 
     setIsGenerating(true)
+    const editSessionId = currentSession.id
 
     try {
       const userDisplayContent = chatInput
@@ -40,7 +46,7 @@ function MainContent({ currentSession, editorContent, chatHistory, onArticleUpda
       }]
       setDisplayChatHistory(newChatHistory)
 
-      writeApi.saveContent(currentSession.id, userDisplayContent, 'quick', 'chat', 'user').catch(() => {})
+      writeApi.saveContent(editSessionId, userDisplayContent, 'quick', 'chat', 'user').catch(() => {})
 
       const url = '/api/write/quick'
       const response = await fetch(url, {
@@ -49,7 +55,7 @@ function MainContent({ currentSession, editorContent, chatHistory, onArticleUpda
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          session_id: currentSession.id,
+          session_id: editSessionId,
           mode: 'edit',
           style: 'general',
           user_requirements: chatInput.trim(),
@@ -76,57 +82,37 @@ function MainContent({ currentSession, editorContent, chatHistory, onArticleUpda
             const { done, value } = await reader.read()
             if (done) break
 
-            buffer += decoder.decode(value, { stream: true })
-            const events = buffer.split('\n\n')
-            buffer = events.pop() || ''
+            const parsed = appendSseChunk(buffer, output, value, decoder)
+            buffer = parsed.buffer
+            output = parsed.output
 
-            for (const event of events) {
-              if (event.startsWith('data:')) {
-                try {
-                  const dataStr = event.slice(5).trim()
-                  if (dataStr) {
-                    const data = JSON.parse(dataStr)
-                    if (data.content) {
-                      output += data.content
-                    }
-                  }
-                } catch (e) {
-                  console.error('Parse error:', e)
-                }
-              }
+            const liveArticle = extractArticlePreview(output)
+            if (liveArticle && editSessionId === currentSessionIdRef.current && onArticleUpdate) {
+              onArticleUpdate(editSessionId, liveArticle, { persist: false })
             }
           }
 
           if (output) {
-            let summaryContent = '已完成修改'
+            const { articleContent: articleResult, summaryContent } = parseGeneratedOutput(output, '已完成修改')
 
-            let articleResult = output
-            const articleMatch = output.match(/---ARTICLE---\n?([\s\S]*?)(?=---SUMMARY---|$)/)
-            const summaryMatch = output.match(/---SUMMARY---\n?([\s\S]*?)$/)
+            await writeApi.saveArticle(editSessionId, articleResult)
 
-            if (articleMatch) {
-              articleResult = articleMatch[1].trim()
-            }
-            if (summaryMatch) {
-              summaryContent = summaryMatch[1].trim()
-            }
-
-            await writeApi.saveArticle(currentSession.id, articleResult)
-
-            if (onArticleUpdate) {
-              onArticleUpdate(currentSession.id, articleResult)
+            if (onArticleUpdate && editSessionId === currentSessionIdRef.current) {
+              onArticleUpdate(editSessionId, articleResult, { persist: false })
             }
 
             const updatedChatHistory = [...newChatHistory, {
               role: 'assistant',
               content: summaryContent
             }]
-            setDisplayChatHistory(updatedChatHistory)
 
-            await writeApi.saveContent(currentSession.id, summaryContent, 'quick', 'chat', 'assistant')
+            await writeApi.saveContent(editSessionId, summaryContent, 'quick', 'chat', 'assistant')
 
-            if (onChatHistoryUpdate) {
-              onChatHistoryUpdate(currentSession.id, updatedChatHistory)
+            if (editSessionId === currentSessionIdRef.current) {
+              setDisplayChatHistory(updatedChatHistory)
+              if (onChatHistoryUpdate) {
+                onChatHistoryUpdate(editSessionId, updatedChatHistory)
+              }
             }
           }
         } catch (e) {

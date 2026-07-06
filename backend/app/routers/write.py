@@ -68,6 +68,7 @@ async def write_quick(payload: WriteQuickIn, db: OrmSession = Depends(get_db)):
             "article_content": payload.article_content,
             "extracted_fields": payload.extracted_fields,
             "style": payload.style,
+            "mode": payload.mode,
         },
     )
 

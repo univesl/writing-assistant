@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import process from 'node:process'
 
 const BACKEND_PORT = process.env.BACKEND_PORT || 9000;
 const FRONTEND_PORT = process.env.FRONTEND_PORT || 7500;
@@ -14,14 +15,14 @@ export default defineConfig({
         target: `http://127.0.0.1:${BACKEND_PORT}`,
         changeOrigin: true,
         secure: false,
-        configure: (proxy, options) => {
-          proxy.on('error', (err, req, res) => {
+        configure: (proxy) => {
+          proxy.on('error', (err) => {
             console.log('proxy error', err);
           });
-          proxy.on('proxyReq', (proxyReq, req, res) => {
+          proxy.on('proxyReq', (_proxyReq, req) => {
             console.log('Sending Request:', req.url);
           });
-          proxy.on('proxyRes', (proxyRes, req, res) => {
+          proxy.on('proxyRes', (proxyRes, req) => {
             console.log('Received Response:', proxyRes.statusCode, req.url);
           });
         }

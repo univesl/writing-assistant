@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { uploadApi } from '../api/uploadApi'
 import './FieldExtractionModal.css'
 
@@ -14,6 +14,7 @@ function FieldExtractionModal({ isOpen, onClose, currentSession }) {
   const [isEditing, setIsEditing] = useState(false)
   const [error, setError] = useState(null)
   const [saveSuccess, setSaveSuccess] = useState(false)
+  const currentSessionId = currentSession?.id || null
 
   // 字段名称映射
   const fieldNameMapping = {
@@ -41,11 +42,11 @@ function FieldExtractionModal({ isOpen, onClose, currentSession }) {
   }
 
   // 获取会话文件列表
-  const loadFiles = async () => {
-    if (!currentSession) return
+  const loadFiles = useCallback(async () => {
+    if (!currentSessionId) return
     
     try {
-      const data = await uploadApi.getSessionFiles(currentSession.id)
+      const data = await uploadApi.getSessionFiles(currentSessionId)
       if (Array.isArray(data)) {
         const parsedFiles = data.filter(file => 
           file.status === 'completed' || file.status === 'parsed'
@@ -55,7 +56,7 @@ function FieldExtractionModal({ isOpen, onClose, currentSession }) {
     } catch (err) {
       console.error('加载文件列表失败:', err)
     }
-  }
+  }, [currentSessionId])
 
   // 获取可用模型列表
   const loadModels = async () => {
@@ -185,7 +186,7 @@ function FieldExtractionModal({ isOpen, onClose, currentSession }) {
       setSelectedFileId('')
       setIsEditing(false)
     }
-  }, [isOpen, currentSession])
+  }, [isOpen, loadFiles])
 
   // 选择文件时加载已保存的字段
   useEffect(() => {

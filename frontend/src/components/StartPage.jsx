@@ -6,7 +6,6 @@ function StartPage({ currentSession, onGenerate, isGenerating }) {
   const [templateType, setTemplateType] = useState('')
   const [quickRequirements, setQuickRequirements] = useState('')
   const [referenceDocuments, setReferenceDocuments] = useState([])
-  const [referenceDocument, setReferenceDocument] = useState(null)
   const [referenceWriteType, setReferenceWriteType] = useState('general')
   const [referenceRequirements, setReferenceRequirements] = useState('')
   const [useRag, setUseRag] = useState(false)
@@ -34,7 +33,6 @@ function StartPage({ currentSession, onGenerate, isGenerating }) {
     const file = e.target.files[0]
     if (!file) return
 
-    setReferenceDocument(file)
     setReferenceDocuments(prev => [
       ...prev,
       { filename: file.name, type: 'upload', file }
@@ -45,9 +43,6 @@ function StartPage({ currentSession, onGenerate, isGenerating }) {
 
   const handleRemoveReference = (index) => {
     setReferenceDocuments(prev => prev.filter((_, i) => i !== index))
-    if (index === 0 && referenceDocuments.length <= 1) {
-      setReferenceDocument(null)
-    }
   }
 
   const handleSubmit = () => {

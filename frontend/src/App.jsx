@@ -7,6 +7,7 @@ import EditorSidebar from './components/EditorSidebar'
 import StartPage from './components/StartPage'
 import { sessionApi } from './api/sessionApi'
 import { writeApi } from './api/writeApi'
+import { appendSseChunk, extractArticlePreview, parseGeneratedOutput } from './utils/generatedOutput'
 
 function App() {
   // 当前选中的会话ID
@@ -17,9 +18,6 @@ function App() {
   // 当前页面：'start' = 开始页面，'content' = 编辑页面
   // 不从 localStorage 恢复，统一从 loadSessionContent 判断
   const [currentPage, setCurrentPage] = useState('start')
-
-  // 存储每个会话的内容，键为会话ID
-  const [sessionContents, setSessionContents] = useState({})
 
   // 当前会话的输出内容（文章主体）
   const [currentSessionOutput, setCurrentSessionOutput] = useState('')
@@ -39,9 +37,12 @@ function App() {
   // 用于跟踪组件是否已挂载，避免竞态条件
   const isMountedRef = useRef(true)
   const isLoadingRef = useRef(false)
+  const sessionLoadIdRef = useRef(0)
+  const currentSessionIdRef = useRef(null)
+  const selectedSessionId = currentSession?.id || null
 
   // 左侧栏显示状态
-  const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
+  const [isSidebarOpen] = useState(() => {
     // 从localStorage恢复侧边栏状态
     const savedState = localStorage.getItem('isSidebarOpen')
     return savedState !== null ? savedState === 'true' : true
@@ -107,25 +108,29 @@ function App() {
 
   // 加载会话内容
   const loadSessionContent = async (sessionId) => {
-    console.log('loadSessionContent called with sessionId:', sessionId)
-    // 先回到开始页面，等查完再确定是否跳转到内容页
+    const loadId = ++sessionLoadIdRef.current
     setCurrentPage('start')
+    setCurrentSessionOutput('')
+    setEditorRealtimeContent('')
+    setCurrentChatHistory([])
+
     try {
-      console.log('Calling getArticle API with sessionId:', sessionId)
-      const articleResponse = await writeApi.getArticle(sessionId)
-      console.log('getArticle response:', articleResponse)
-      const articleText = articleResponse?.article_content || ''
-      if (articleText.trim().length >= 10) {
-        setCurrentSessionOutput(articleText)
-        // 会话有文章内容（至少 10 个有效字符）时切换到内容页
-        setCurrentPage('content')
-      } else {
-        setCurrentSessionOutput('')
+      const [articleResponse, chatResponse] = await Promise.all([
+        writeApi.getArticle(sessionId),
+        writeApi.getSessionContent(sessionId),
+      ])
+
+      if (!isMountedRef.current || loadId !== sessionLoadIdRef.current) {
+        return
       }
 
-      console.log('Calling getSessionContent API with sessionId:', sessionId)
-      const chatResponse = await writeApi.getSessionContent(sessionId)
-      console.log('getSessionContent response:', chatResponse)
+      const articleText = articleResponse?.article_content || ''
+      const hasArticle = articleText.trim().length > 0
+
+      setCurrentSessionOutput(hasArticle ? articleText : '')
+      setEditorRealtimeContent(hasArticle ? articleText : '')
+      setCurrentPage(hasArticle ? 'content' : 'start')
+
       if (chatResponse && chatResponse.length > 0) {
         setCurrentChatHistory(chatResponse.map(item => ({
           role: item.role,
@@ -135,9 +140,14 @@ function App() {
         setCurrentChatHistory([])
       }
     } catch (error) {
+      if (loadId !== sessionLoadIdRef.current) {
+        return
+      }
       console.error('加载会话内容失败:', error)
       setCurrentSessionOutput('')
+      setEditorRealtimeContent('')
       setCurrentChatHistory([])
+      setCurrentPage('start')
     }
   }
 
@@ -152,12 +162,20 @@ function App() {
 
   // 当前会话变化时加载会话内容
   useEffect(() => {
-    if (currentSession && currentSession.id) {
-      console.log('Current session changed, loading content for session:', currentSession.id)
-      loadSessionContent(currentSession.id)
+    currentSessionIdRef.current = selectedSessionId
+
+    if (selectedSessionId) {
+      loadSessionContent(selectedSessionId)
+      setCurrentQuotes([])
+    } else {
+      sessionLoadIdRef.current += 1
+      setCurrentPage('start')
+      setCurrentSessionOutput('')
+      setEditorRealtimeContent('')
+      setCurrentChatHistory([])
       setCurrentQuotes([])
     }
-  }, [currentSession])
+  }, [selectedSessionId])
 
   // 保存侧边栏状态到localStorage
   useEffect(() => {
@@ -179,6 +197,8 @@ function App() {
       setSessions([newSession, ...sessions])
 
       // 设置当前会话为新创建的会话
+      sessionLoadIdRef.current += 1
+      currentSessionIdRef.current = newSession.id
       setCurrentSession(newSession)
       // 保存当前会话ID到localStorage
       localStorage.setItem('currentSessionId', newSession.id)
@@ -193,6 +213,8 @@ function App() {
         updatedAt: new Date().toLocaleString()
       }
       setSessions([mockSession, ...sessions])
+      sessionLoadIdRef.current += 1
+      currentSessionIdRef.current = mockSession.id
       setCurrentSession(mockSession)
       // 保存当前会话ID到localStorage
       localStorage.setItem('currentSessionId', mockSession.id)
@@ -213,12 +235,16 @@ function App() {
       // 如果删除的是当前会话，设置新的当前会话
       if (currentSession.id === sessionId) {
         if (updatedSessions.length > 0) {
+          sessionLoadIdRef.current += 1
+          currentSessionIdRef.current = updatedSessions[0].id
           setCurrentSession(updatedSessions[0])
           // 保存新的当前会话ID到localStorage
           localStorage.setItem('currentSessionId', updatedSessions[0].id)
           setCurrentPage('start')
         } else {
           // 如果删除了最后一个会话，清空当前会话
+          sessionLoadIdRef.current += 1
+          currentSessionIdRef.current = null
           setCurrentSession(null)
           // 从localStorage中删除当前会话ID
           localStorage.removeItem('currentSessionId')
@@ -233,12 +259,16 @@ function App() {
 
       if (currentSession.id === sessionId) {
         if (updatedSessions.length > 0) {
+          sessionLoadIdRef.current += 1
+          currentSessionIdRef.current = updatedSessions[0].id
           setCurrentSession(updatedSessions[0])
           // 保存新的当前会话ID到localStorage
           localStorage.setItem('currentSessionId', updatedSessions[0].id)
           setCurrentPage('start')
         } else {
           // 如果删除了最后一个会话，清空当前会话
+          sessionLoadIdRef.current += 1
+          currentSessionIdRef.current = null
           setCurrentSession(null)
           // 从localStorage中删除当前会话ID
           localStorage.removeItem('currentSessionId')
@@ -286,6 +316,8 @@ function App() {
 
   // 处理会话切换
   const handleSessionChange = (session) => {
+    sessionLoadIdRef.current += 1
+    currentSessionIdRef.current = session.id
     setCurrentSession(session)
     localStorage.setItem('currentSessionId', session.id)
     // 切换会话时立即回到开始页面，等 loadSessionContent 确定有无内容
@@ -293,9 +325,13 @@ function App() {
   }
 
   // 处理文章内容更新
-  const handleArticleUpdate = async (sessionId, content) => {
-    if (sessionId === currentSession?.id) {
+  const handleArticleUpdate = async (sessionId, content, options = {}) => {
+    const { persist = true } = options
+    if (sessionId === currentSessionIdRef.current) {
       setCurrentSessionOutput(content)
+      setEditorRealtimeContent(content)
+      if (!persist) return
+
       try {
         await writeApi.saveArticle(sessionId, content)
         console.log('文章内容已保存到后端')
@@ -307,7 +343,7 @@ function App() {
 
   // 处理对话历史更新
   const handleChatHistoryUpdate = (sessionId, chatHistory) => {
-    if (sessionId === currentSession.id) {
+    if (sessionId === currentSessionIdRef.current) {
       setCurrentChatHistory(chatHistory)
     }
   }
@@ -342,6 +378,7 @@ function App() {
   const handleStartGeneration = async (config) => {
     if (!currentSession || isGenerating) return
     setIsGenerating(true)
+    const generationSessionId = currentSession.id
 
     try {
       const DEFAULT_MODEL = 'Qwen2.5-72B-Instruct'
@@ -380,9 +417,13 @@ function App() {
         content: userDisplayContent
       }]
       setCurrentChatHistory(newChatHistory)
-      writeApi.saveContent(currentSession.id, userDisplayContent, writingMode === 'quick' ? 'quick' : 'reference', 'chat', 'user').catch(() => {})
+      writeApi.saveContent(generationSessionId, userDisplayContent, writingMode === 'quick' ? 'quick' : 'reference', 'chat', 'user').catch(() => {})
 
       if (writingMode === 'quick') {
+        setCurrentSessionOutput('')
+        setEditorRealtimeContent('')
+        setCurrentPage('content')
+
         // RAG 统一由后端在 /api/write/quick 中自动做，前端不预调用
         const controller = new AbortController()
         const timeoutId = setTimeout(() => controller.abort(), 120000)  // 2 分钟超时
@@ -392,7 +433,7 @@ function App() {
           headers: { 'Content-Type': 'application/json' },
           signal: controller.signal,
           body: JSON.stringify({
-            session_id: currentSession.id,
+            session_id: generationSessionId,
             mode: 'quick',
             style: templateType || 'general',
             user_requirements: quickRequirements || '',
@@ -420,52 +461,34 @@ function App() {
             const { done, value } = await reader.read()
             if (done) break
 
-            buffer += decoder.decode(value, { stream: true })
-            const events = buffer.split('\n\n')
-            buffer = events.pop() || ''
+            const parsed = appendSseChunk(buffer, output, value, decoder)
+            buffer = parsed.buffer
+            output = parsed.output
 
-            for (const event of events) {
-              if (event.startsWith('data:')) {
-                try {
-                  const dataStr = event.slice(5).trim()
-                  if (dataStr) {
-                    const data = JSON.parse(dataStr)
-                    if (data.content) {
-                      output += data.content
-                    }
-                  }
-                } catch (e) {
-                  console.error('Parse error:', e)
-                }
-              }
+            const liveArticle = extractArticlePreview(output)
+            if (liveArticle && generationSessionId === currentSessionIdRef.current) {
+              setCurrentSessionOutput(liveArticle)
+              setEditorRealtimeContent(liveArticle)
             }
           }
 
           if (output) {
-            let articleContent = output
-            let summaryContent = '已生成文章'
+            const { articleContent, summaryContent } = parseGeneratedOutput(output, '已生成文章')
 
-            const articleMatch = output.match(/---ARTICLE---\n?([\s\S]*?)(?=---SUMMARY---|$)/)
-            const summaryMatch = output.match(/---SUMMARY---\n?([\s\S]*?)$/)
-
-            if (articleMatch) {
-              articleContent = articleMatch[1].trim()
-            }
-            if (summaryMatch) {
-              summaryContent = summaryMatch[1].trim()
-            }
-
-            await writeApi.saveArticle(currentSession.id, articleContent)
+            await writeApi.saveArticle(generationSessionId, articleContent)
 
             const updatedChatHistory = [...newChatHistory, {
               role: 'assistant',
               content: summaryContent
             }]
-            setCurrentChatHistory(updatedChatHistory)
-            await writeApi.saveContent(currentSession.id, summaryContent, 'quick', 'chat', 'assistant')
+            await writeApi.saveContent(generationSessionId, summaryContent, 'quick', 'chat', 'assistant')
 
-            setCurrentSessionOutput(articleContent)
-            setCurrentPage('content')
+            if (generationSessionId === currentSessionIdRef.current) {
+              setCurrentChatHistory(updatedChatHistory)
+              setCurrentSessionOutput(articleContent)
+              setEditorRealtimeContent(articleContent)
+              setCurrentPage('content')
+            }
           }
         }
 
@@ -476,7 +499,7 @@ function App() {
         if (!uploadDoc) return
 
         // 需要先上传文件获取内容
-        const fileData = await uploadFileToSession(uploadDoc.file)
+        const fileData = await uploadFileToSession(uploadDoc.file, generationSessionId)
 
         // 如果后端没有解析出内容，尝试本地读取
         let refContent = fileData?.parsed_content || ''
@@ -492,7 +515,7 @@ function App() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            session_id: currentSession.id,
+            session_id: generationSessionId,
             reference_content: refContent,
             reference_filename: uploadDoc.filename || '',
             generate_type: referenceWriteType,
@@ -512,42 +535,42 @@ function App() {
         const reader = response.body.getReader()
         const decoder = new TextDecoder()
         let fullContent = ''
+        setCurrentSessionOutput('')
+        setEditorRealtimeContent('')
+        setCurrentPage('content')
 
         while (true) {
           const { done, value } = await reader.read()
           if (done) break
           fullContent += decoder.decode(value, { stream: true })
+
+          const liveArticle = extractArticlePreview(fullContent)
+          if (liveArticle && generationSessionId === currentSessionIdRef.current) {
+            setCurrentSessionOutput(liveArticle)
+            setEditorRealtimeContent(liveArticle)
+          }
         }
 
-        let articleContent = fullContent
         const typeLabels = {
           reply: '生成回函',
           imitate: '仿写公文',
           general: '基于内容生成'
         }
-        let summaryContent = (typeLabels[referenceWriteType] || '参考写作') + '完成'
+        const fallbackSummary = (typeLabels[referenceWriteType] || '参考写作') + '完成'
+        const { articleContent, summaryContent } = parseGeneratedOutput(fullContent, fallbackSummary)
 
-        const articleMatch = fullContent.match(/---ARTICLE---\n?([\s\S]*?)(?:---SUMMARY---|$)/)
-        const summaryMatch = fullContent.match(/---SUMMARY---\n?([\s\S]*?)$/)
-
-        if (articleMatch) {
-          articleContent = articleMatch[1].trim()
-        }
-        if (summaryMatch) {
-          summaryContent = summaryMatch[1].trim()
-        }
-
-        await writeApi.saveArticle(currentSession.id, articleContent)
+        await writeApi.saveArticle(generationSessionId, articleContent)
 
         const updatedChatHistory = [...newChatHistory, {
           role: 'assistant',
           content: summaryContent
         }]
-        setCurrentChatHistory(updatedChatHistory)
-        await writeApi.saveContent(currentSession.id, summaryContent, 'reference', 'chat', 'assistant')
+        await writeApi.saveContent(generationSessionId, summaryContent, 'reference', 'chat', 'assistant')
 
-        setCurrentSessionOutput(articleContent)
-        if (articleContent) {
+        if (generationSessionId === currentSessionIdRef.current) {
+          setCurrentChatHistory(updatedChatHistory)
+          setCurrentSessionOutput(articleContent)
+          setEditorRealtimeContent(articleContent)
           setCurrentPage('content')
         }
       }
@@ -560,15 +583,15 @@ function App() {
   }
 
   // 上传文件辅助函数
-  const uploadFileToSession = async (file) => {
-    if (!file || !currentSession) return null
+  const uploadFileToSession = async (file, sessionId = currentSessionIdRef.current) => {
+    if (!file || !sessionId) return null
     try {
       const formData = new FormData()
       formData.append('file', file)
       formData.append('auto_parse', 'true')
       formData.append('auto_extract', 'false')
 
-      const response = await fetch(`/api/upload/session/${currentSession.id}`, {
+      const response = await fetch(`/api/upload/session/${sessionId}`, {
         method: 'POST',
         body: formData
       })

@@ -12,7 +12,7 @@ from datetime import datetime
 from pydantic import BaseModel
 
 from ..database import get_db
-from ..models import Session as SessionModel, Content as ContentModel
+from ..models import Session as SessionModel, Content as ContentModel, Template
 from ..utils import ok, err, dt_str
 from ..schemas import SaveArticleIn
 from ..services.mineru_service import mineru_service
