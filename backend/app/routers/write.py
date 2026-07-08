@@ -1,5 +1,4 @@
 import json
-import asyncio
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
@@ -8,7 +7,7 @@ from sqlalchemy.orm import Session as OrmSession
 from ..database import get_db
 from ..models import Session as SessionModel, Content as ContentModel
 from ..schemas import WriteQuickIn, WriteSaveIn
-from ..utils import ok, err
+from ..utils import ok
 from ..services.llm import stream_text_from_llm
 from ..services.prompt_builder import build_prompt
 from ..services.kng_rag_service import get_kng_rag_service
@@ -18,6 +17,39 @@ router = APIRouter(prefix="/write", tags=["write"])
 
 def sse_pack(content: str, finish: bool) -> str:
     return f"data: {json.dumps({'content': content, 'finish': finish}, ensure_ascii=False)}\n\n"
+
+
+def _default_rag_topic(payload: WriteQuickIn) -> str:
+    return (
+        "通知公文" if payload.style == "notice" else
+        "规章制度" if payload.style == "regulation" else
+        "讲话稿" if payload.style == "speech" else
+        "文章"
+    )
+
+
+def _retrieve_rag_content(payload: WriteQuickIn) -> tuple[str, list]:
+    """Keep KnG optional: failure or unavailable service must not block writing."""
+    rag_content = payload.rag_content
+    rag_references = payload.rag_references
+    if payload.use_rag and not rag_content:
+        try:
+            service = get_kng_rag_service()
+            if service.is_ready():
+                topic = payload.user_requirements or _default_rag_topic(payload)
+                result = service.retrieve_for_document_generation(
+                    topic=topic,
+                    requirements=payload.user_requirements or "",
+                    mode="local",
+                )
+                if result.get("content"):
+                    rag_content = result["content"]
+                    rag_references = result.get("references", [])
+                    print(f"[write] RAG 检索完成，内容长度: {len(rag_content)}")
+        except Exception as e:
+            print(f"[write] RAG 检索失败（跳过）: {e}")
+
+    return rag_content, rag_references
 
 
 @router.post("/quick")
@@ -31,29 +63,7 @@ async def write_quick(payload: WriteQuickIn, db: OrmSession = Depends(get_db)):
         payload.session_id = session.session_id
 
     # 仅当用户勾选了"启用知识库检索"且未提供 rag_content 时，才做 RAG 检索
-    rag_content = payload.rag_content
-    rag_references = payload.rag_references
-    if payload.use_rag and not rag_content:
-        try:
-            service = get_kng_rag_service()
-            if service.is_ready():
-                topic = payload.user_requirements or (
-                    "通知公文" if payload.style == "notice" else
-                    "规章制度" if payload.style == "regulation" else
-                    "讲话稿" if payload.style == "speech" else
-                    "文章"
-                )
-                result = service.retrieve_for_document_generation(
-                    topic=topic,
-                    requirements=payload.user_requirements or "",
-                    mode="local",
-                )
-                if result.get("content"):
-                    rag_content = result["content"]
-                    rag_references = result.get("references", [])
-                    print(f"[write] RAG 检索完成，内容长度: {len(rag_content)}")
-        except Exception as e:
-            print(f"[write] RAG 检索失败（跳过）: {e}")
+    rag_content, rag_references = _retrieve_rag_content(payload)
 
     messages = build_prompt(
         mode=payload.mode,
@@ -117,3 +127,4 @@ def write_save(payload: WriteSaveIn, db: OrmSession = Depends(get_db)):
     db.refresh(c)
 
     return ok({"content_id": c.content_id}, "保存成功")
+

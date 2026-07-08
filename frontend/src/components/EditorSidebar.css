@@ -235,108 +235,171 @@
   padding: 20px;
   overflow-y: auto;
   background-color: #fff;
+  position: relative;
 }
 
-/* 编辑模式 */
-.editor-textarea {
-  width: 100%;
-  min-height: 400px;
-  padding: 12px;
-  border: 1px solid #d9d9d9;
+.wysiwyg-markdown-editor {
+  min-height: 620px;
+  border: 1px solid #e8ecef;
   border-radius: 8px;
-  font-size: 16px;
-  line-height: 1.8;
-  resize: none;
-  font-family: inherit;
-  background-color: #fafafa;
-  transition: all 0.2s;
+  background: #fff;
+  overflow: visible;
 }
 
-.editor-textarea:focus {
-  outline: none;
-  border-color: #1890ff;
-  box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.1);
-  background-color: #fff;
+.wysiwyg-markdown-editor .mdxeditor-toolbar {
+  border-bottom: 1px solid #e8ecef;
+  background: #f8f9fa;
+  position: sticky;
+  top: -20px;
+  z-index: 30;
+  box-shadow: 0 6px 12px rgba(15, 23, 42, 0.06);
 }
 
-/* 预览模式 */
-.editor-preview {
-  min-height: 400px;
-}
-
-.empty-editor {
-  color: #999;
-  font-style: italic;
-  display: flex;
+.wysiwyg-markdown-editor .mdxeditor-toolbar .ai-edit-toolbar-button {
+  display: inline-flex !important;
   align-items: center;
   justify-content: center;
-  height: 200px;
-  background-color: #fafafa;
-  border-radius: 8px;
-  border: 1px dashed #d9d9d9;
+  gap: 4px;
+  width: auto !important;
+  min-width: 74px;
+  height: 28px !important;
+  padding: 0 8px !important;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  white-space: nowrap !important;
+  color: #1677ff;
+  font: inherit;
+  cursor: pointer;
+  flex: 0 0 auto;
+  writing-mode: horizontal-tb;
 }
 
-.content-display {
+.wysiwyg-markdown-editor .mdxeditor-toolbar .ai-edit-toolbar-button:hover {
+  background: #e6f4ff;
+}
+
+.wysiwyg-markdown-editor .mdxeditor-toolbar .ai-edit-toolbar-button:focus-visible {
+  outline: 2px solid rgba(22, 119, 255, 0.35);
+  outline-offset: 1px;
+}
+
+.wysiwyg-markdown-editor .mdxeditor-toolbar .ai-edit-toolbar-button > span {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap !important;
+}
+
+.wysiwyg-markdown-editor .mdxeditor-toolbar .ai-edit-toolbar-button svg {
+  flex: 0 0 auto;
+}
+
+.ai-edit-notice {
+  position: sticky;
+  top: 52px;
+  left: 50%;
+  z-index: 40;
+  width: fit-content;
+  max-width: min(420px, calc(100% - 32px));
+  margin: 0 auto -40px auto;
+  padding: 8px 14px;
+  border: 1px solid #ffd591;
+  border-radius: 6px;
+  background: #fff7e6;
+  color: #ad6800;
+  font-size: 13px;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.12);
+  pointer-events: none;
+}
+
+.wysiwyg-markdown-content {
+  min-height: 560px;
+  padding: 24px 32px;
   font-size: 16px;
   line-height: 1.8;
   color: #333;
-  white-space: pre-wrap;
   word-break: break-word;
 }
 
-.content-line {
-  margin-bottom: 8px;
+.wysiwyg-markdown-content:focus {
+  outline: none;
+}
+
+.wysiwyg-markdown-content p {
+  margin: 0 0 12px 0;
   text-indent: 2em;
 }
 
-.content-line:first-child {
-  text-indent: 0;
-}
-
-/* 标题样式 */
-.heading {
+.wysiwyg-markdown-content h1,
+.wysiwyg-markdown-content h2,
+.wysiwyg-markdown-content h3,
+.wysiwyg-markdown-content h4,
+.wysiwyg-markdown-content h5,
+.wysiwyg-markdown-content h6 {
+  color: #1a1a1a;
   font-weight: 600;
-  margin: 16px 0 8px 0;
-  color: #1a1a1a;
+  line-height: 1.45;
+  margin: 18px 0 10px;
   text-indent: 0;
 }
 
-.heading.level-1 {
-  font-size: 21px;
-  border-bottom: 1px solid #e8ecef;
-  padding-bottom: 4px;
-}
-
-/* 文章主标题样式 */
-.heading.main-title {
-  font-size: 29px;
+.wysiwyg-markdown-content h1 {
+  font-size: 28px;
   font-weight: 700;
-  color: #1a1a1a;
-  margin: 0 0 24px 0;
+  text-align: center;
   padding-bottom: 12px;
   border-bottom: 2px solid #e8ecef;
-  text-align: center;
 }
 
-.heading.level-2 {
-  font-size: 21px;
+.wysiwyg-markdown-content h2 {
+  font-size: 22px;
 }
 
-.heading.level-3 {
-  font-size: 21px;
+.wysiwyg-markdown-content h3 {
+  font-size: 20px;
 }
 
-.heading.level-4 {
+.wysiwyg-markdown-content h4,
+.wysiwyg-markdown-content h5,
+.wysiwyg-markdown-content h6 {
   font-size: 16px;
 }
 
-.heading.level-5 {
-  font-size: 16px;
+.wysiwyg-markdown-content ul,
+.wysiwyg-markdown-content ol {
+  margin: 0 0 12px 2em;
+  padding-left: 1.4em;
 }
 
-.heading.level-6 {
-  font-size: 13px;
-  color: #666;
+.wysiwyg-markdown-content li {
+  margin-bottom: 6px;
+}
+
+.wysiwyg-markdown-content blockquote {
+  margin: 12px 0;
+  padding: 8px 14px;
+  border-left: 4px solid #d9e5f2;
+  background: #f7f9fc;
+  color: #4a5568;
+}
+
+.wysiwyg-markdown-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+}
+
+.wysiwyg-markdown-content th,
+.wysiwyg-markdown-content td {
+  border: 1px solid #e8ecef;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.wysiwyg-markdown-content th {
+  background: #f7f9fc;
+  font-weight: 600;
 }
 
 /* 编辑器底部 */
@@ -886,14 +949,19 @@
   animation: aiDialogIn 0.2s ease;
 }
 
+.ai-edit-dialog.dragging {
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.18), 0 3px 10px rgba(0, 0, 0, 0.1);
+  user-select: none;
+}
+
 @keyframes aiDialogIn {
   from {
     opacity: 0;
-    transform: translate(-50%, -90%) scale(0.95);
+    transform: translateY(8px) scale(0.98);
   }
   to {
     opacity: 1;
-    transform: translate(-50%, -100%) scale(1);
+    transform: translateY(0) scale(1);
   }
 }
 
@@ -907,6 +975,8 @@
   font-size: 14px;
   font-weight: 600;
   color: #1a1a1a;
+  cursor: move;
+  user-select: none;
 }
 
 .ai-edit-dialog-header svg {
@@ -930,31 +1000,6 @@
 
 .ai-edit-dialog-body {
   padding: 14px 16px;
-}
-
-.ai-edit-selected-text {
-  margin-bottom: 12px;
-}
-
-.ai-edit-label {
-  font-size: 12px;
-  font-weight: 600;
-  color: #888;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.ai-edit-text-preview {
-  margin-top: 6px;
-  padding: 10px 12px;
-  background: #f7f9fc;
-  border: 1px solid #e8ecef;
-  border-radius: 8px;
-  font-size: 13px;
-  line-height: 1.5;
-  color: #555;
-  max-height: 80px;
-  overflow-y: auto;
 }
 
 .ai-edit-input {
@@ -1024,3 +1069,15 @@
   background: #d9d9d9;
   cursor: not-allowed;
 }
+
+.ai-edit-error {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid #ffccc7;
+  border-radius: 6px;
+  background: #fff2f0;
+  color: #cf1322;
+  font-size: 12px;
+  line-height: 1.5;
+}
+

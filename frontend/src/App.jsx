@@ -7,7 +7,8 @@ import EditorSidebar from './components/EditorSidebar'
 import StartPage from './components/StartPage'
 import { sessionApi } from './api/sessionApi'
 import { writeApi } from './api/writeApi'
-import { appendSseChunk, extractArticlePreview, parseGeneratedOutput } from './utils/generatedOutput'
+import { extractArticlePreview, parseGeneratedOutput } from './utils/generatedOutput'
+import { streamQuickWrite } from './services/writeStream'
 
 function App() {
   // 当前选中的会话ID
@@ -425,14 +426,8 @@ function App() {
         setCurrentPage('content')
 
         // RAG 统一由后端在 /api/write/quick 中自动做，前端不预调用
-        const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), 120000)  // 2 分钟超时
-
-        const response = await fetch('/api/write/quick', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: controller.signal,
-          body: JSON.stringify({
+        const { articleContent, summaryContent } = await streamQuickWrite({
+          payload: {
             session_id: generationSessionId,
             mode: 'quick',
             style: templateType || 'general',
@@ -447,49 +442,30 @@ function App() {
             model_type: 'general',
             llm_model: 'qwen',
             use_rag: useRag || false,
-          })
-        })
-        clearTimeout(timeoutId)
-
-        if (response.body && response.body.getReader) {
-          const reader = response.body.getReader()
-          const decoder = new TextDecoder('utf-8')
-          let buffer = ''
-          let output = ''
-
-          while (true) {
-            const { done, value } = await reader.read()
-            if (done) break
-
-            const parsed = appendSseChunk(buffer, output, value, decoder)
-            buffer = parsed.buffer
-            output = parsed.output
-
-            const liveArticle = extractArticlePreview(output)
-            if (liveArticle && generationSessionId === currentSessionIdRef.current) {
+          },
+          timeoutMs: 120000,
+          fallbackSummary: '已生成文章',
+          onArticle: (liveArticle) => {
+            if (generationSessionId === currentSessionIdRef.current) {
               setCurrentSessionOutput(liveArticle)
               setEditorRealtimeContent(liveArticle)
             }
-          }
+          },
+        })
 
-          if (output) {
-            const { articleContent, summaryContent } = parseGeneratedOutput(output, '已生成文章')
+        await writeApi.saveArticle(generationSessionId, articleContent)
 
-            await writeApi.saveArticle(generationSessionId, articleContent)
+        const updatedChatHistory = [...newChatHistory, {
+          role: 'assistant',
+          content: summaryContent
+        }]
+        await writeApi.saveContent(generationSessionId, summaryContent, 'quick', 'chat', 'assistant')
 
-            const updatedChatHistory = [...newChatHistory, {
-              role: 'assistant',
-              content: summaryContent
-            }]
-            await writeApi.saveContent(generationSessionId, summaryContent, 'quick', 'chat', 'assistant')
-
-            if (generationSessionId === currentSessionIdRef.current) {
-              setCurrentChatHistory(updatedChatHistory)
-              setCurrentSessionOutput(articleContent)
-              setEditorRealtimeContent(articleContent)
-              setCurrentPage('content')
-            }
-          }
+        if (generationSessionId === currentSessionIdRef.current) {
+          setCurrentChatHistory(updatedChatHistory)
+          setCurrentSessionOutput(articleContent)
+          setEditorRealtimeContent(articleContent)
+          setCurrentPage('content')
         }
 
 
@@ -645,6 +621,8 @@ function App() {
                 onArticleUpdate={handleArticleUpdate}
                 onAddQuote={handleAddQuote}
                 onEditorContentChange={handleEditorContentChange}
+                chatHistory={currentChatHistory}
+                onChatHistoryUpdate={handleChatHistoryUpdate}
               />
               <MainContent
                 currentSession={currentSession}

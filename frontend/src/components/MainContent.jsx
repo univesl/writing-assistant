@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { writeApi } from '../api/writeApi'
-import { appendSseChunk, extractArticlePreview, parseGeneratedOutput } from '../utils/generatedOutput'
+import { streamQuickWrite } from '../services/writeStream'
 
 function MainContent({ currentSession, editorContent, chatHistory, onArticleUpdate, onChatHistoryUpdate }) {
   const [isGenerating, setIsGenerating] = useState(false)
@@ -48,13 +48,8 @@ function MainContent({ currentSession, editorContent, chatHistory, onArticleUpda
 
       writeApi.saveContent(editSessionId, userDisplayContent, 'quick', 'chat', 'user').catch(() => {})
 
-      const url = '/api/write/quick'
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
+      const { articleContent: articleResult, summaryContent } = await streamQuickWrite({
+        payload: {
           session_id: editSessionId,
           mode: 'edit',
           style: 'general',
@@ -68,55 +63,32 @@ function MainContent({ currentSession, editorContent, chatHistory, onArticleUpda
           extracted_fields: {},
           model_type: 'general',
           llm_model: 'qwen'
-        })
+        },
+        fallbackSummary: '已完成修改',
+        onArticle: (liveArticle) => {
+          if (editSessionId === currentSessionIdRef.current && onArticleUpdate) {
+            onArticleUpdate(editSessionId, liveArticle, { persist: false })
+          }
+        },
       })
 
-      if (response.body && response.body.getReader) {
-        const reader = response.body.getReader()
-        const decoder = new TextDecoder('utf-8')
-        let buffer = ''
-        let output = ''
+      await writeApi.saveArticle(editSessionId, articleResult)
 
-        try {
-          while (true) {
-            const { done, value } = await reader.read()
-            if (done) break
+      if (onArticleUpdate && editSessionId === currentSessionIdRef.current) {
+        onArticleUpdate(editSessionId, articleResult, { persist: false })
+      }
 
-            const parsed = appendSseChunk(buffer, output, value, decoder)
-            buffer = parsed.buffer
-            output = parsed.output
+      const updatedChatHistory = [...newChatHistory, {
+        role: 'assistant',
+        content: summaryContent
+      }]
 
-            const liveArticle = extractArticlePreview(output)
-            if (liveArticle && editSessionId === currentSessionIdRef.current && onArticleUpdate) {
-              onArticleUpdate(editSessionId, liveArticle, { persist: false })
-            }
-          }
+      await writeApi.saveContent(editSessionId, summaryContent, 'quick', 'chat', 'assistant')
 
-          if (output) {
-            const { articleContent: articleResult, summaryContent } = parseGeneratedOutput(output, '已完成修改')
-
-            await writeApi.saveArticle(editSessionId, articleResult)
-
-            if (onArticleUpdate && editSessionId === currentSessionIdRef.current) {
-              onArticleUpdate(editSessionId, articleResult, { persist: false })
-            }
-
-            const updatedChatHistory = [...newChatHistory, {
-              role: 'assistant',
-              content: summaryContent
-            }]
-
-            await writeApi.saveContent(editSessionId, summaryContent, 'quick', 'chat', 'assistant')
-
-            if (editSessionId === currentSessionIdRef.current) {
-              setDisplayChatHistory(updatedChatHistory)
-              if (onChatHistoryUpdate) {
-                onChatHistoryUpdate(editSessionId, updatedChatHistory)
-              }
-            }
-          }
-        } catch (e) {
-          console.error('Stream reading error:', e)
+      if (editSessionId === currentSessionIdRef.current) {
+        setDisplayChatHistory(updatedChatHistory)
+        if (onChatHistoryUpdate) {
+          onChatHistoryUpdate(editSessionId, updatedChatHistory)
         }
       }
     } catch (error) {
