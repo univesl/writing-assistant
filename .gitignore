@@ -68,3 +68,8 @@ Thumbs.db
 DEV_WORKFLOW.md
 DEPLOYMENT.md
 operation.md
+
+# Default export template directory
+format/*
+!format/
+!format/template.docx
