@@ -40,7 +40,7 @@ export const uploadApi = {
       headers: {
         'Content-Type': 'multipart/form-data'
       },
-      timeout: 120000  // 2分钟超时，因为LLM字段提取可能需要较长时间
+      timeout: 300000  // 5分钟超时，因为 Qwen3.5 字段提取可能需要较长时间
     })
     return response
   },
