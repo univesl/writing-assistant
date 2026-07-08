@@ -121,10 +121,11 @@ class FieldExtractor:
         """通过模型名称快速创建提取器
         
         Args:
-            model_name: 模型名称，默认使用 qwen3.5-397b (Qwen3.5-397B-A17B)
+            model_name: 模型名称，默认使用 qwen3-235b-h3i (Qwen3-235B-A22B-Instruct-2507)
         """
+        # 默认使用 Qwen3-235B 模型（与文档生成保持一致）
         if model_name is None:
-            model_name = "qwen3.5-397b"
+            model_name = "qwen3-235b-h3i"
         
         if model_name not in AVAILABLE_MODELS:
             raise ValueError(f"未知模型: {model_name}. 可用模型: {list(AVAILABLE_MODELS.keys())}")
@@ -242,7 +243,7 @@ class FieldExtractor:
                     "Content-Type": "application/json"
                 },
                 json={
-                    "model": self.llm_config.get("model", "Qwen3.5-397B-A17B"),
+                    "model": self.llm_config.get("model", "xhang_nlp_qwen2.5-72b"),
                     "messages": [
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": truncated}

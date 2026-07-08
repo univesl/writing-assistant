@@ -32,7 +32,7 @@ async def upload_session_file(
     file: UploadFile = File(...),
     auto_parse: bool = Form(True),
     auto_extract: bool = Form(True),
-    model_name: str = Form("qwen3.5-397b"),
+    model_name: str = Form("qwen2.5-72b"),
     db: OrmSession = Depends(get_db)
 ):
     """
@@ -187,7 +187,7 @@ def get_file_detail(file_id: int, db: OrmSession = Depends(get_db)):
 @router.post("/file/{file_id}/extract")
 def extract_file_fields(
     file_id: int,
-    model_name: str = Form("qwen3.5-397b"),
+    model_name: str = Form("qwen2.5-72b"),
     db: OrmSession = Depends(get_db)
 ):
     """重新提取文件字段（用于手动触发或更换模型）"""
@@ -283,10 +283,9 @@ def delete_file(file_id: int, db: OrmSession = Depends(get_db)):
         return err(500, f"删除失败: {str(e)}")
 
 
-# 模型显示名称映射
+# 模型显示名称映射（统一使用 Qwen2.5-72B）
 MODEL_DISPLAY_NAMES = {
-    "qwen3.5-397b": "Qwen3.5-397B (默认)",
-    "qwen2.5-72b": "Qwen2.5-72B",
+    "qwen2.5-72b": "Qwen2.5-72B (统一模型)",
 }
 
 

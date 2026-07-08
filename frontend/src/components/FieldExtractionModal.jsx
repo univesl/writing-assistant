@@ -6,7 +6,7 @@ function FieldExtractionModal({ isOpen, onClose, currentSession }) {
   const [files, setFiles] = useState([])
   const [selectedFileId, setSelectedFileId] = useState('')
   const [models, setModels] = useState([])
-  const [selectedModel, setSelectedModel] = useState('qwen3.5-397b')
+  const [selectedModel, setSelectedModel] = useState('qwen2.5-72b')
   const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [extractionResult, setExtractionResult] = useState(null)

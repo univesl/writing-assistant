@@ -28,7 +28,7 @@ class GenerateRequest(BaseModel):
     """文档生成请求"""
     topic: str
     requirements: str = ""
-    model_name: str = "Qwen3.5-397B-A17B"
+    model_name: str = "Qwen2.5-72B-Instruct"  # 默认使用快速模型
     use_knowledge_base: bool = True
     retrieval_mode: str = "local"  # local, global, hybrid, mix, naive
     top_k: int = 60

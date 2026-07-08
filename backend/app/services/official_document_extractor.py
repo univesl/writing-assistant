@@ -23,7 +23,7 @@ class DocumentParseError(Exception):
 def extract_from_base64(
     filename: str,
     content_base64: str,
-    model_name: str = "qwen3.5-397b",
+    model_name: str = "qwen2.5-72b",
     include_parsed_content: bool = False,
 ) -> dict:
     """从 Base64 编码的文件内容提取公文字段，文件会保存到 upload 目录"""

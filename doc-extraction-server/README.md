@@ -95,7 +95,7 @@ Content-Type: application/json
 |------|------|------|------|
 | `filename` | 是 | string | 文件名（含扩展名，如 report.pdf） |
 | `content_base64` | 是 | string | 文件内容的 Base64 编码 |
-| `model_name` | 否 | string | 提取模型，默认 `qwen3.5-397b` |
+| `model_name` | 否 | string | 提取模型，默认 `qwen2.5-72b` |
 | `include_parsed_content` | 否 | boolean | 是否返回解析正文，默认 `false` |
 
 **成功响应**（HTTP 201）：
@@ -104,7 +104,7 @@ Content-Type: application/json
 {
   "filename": "xxx.pdf",
   "file_type": "pdf",
-  "model_name": "qwen3.5-397b",
+  "model_name": "qwen2.5-72b",
   "content_length": 1632,
   "fields": {
     "文件标题": "...",
@@ -140,7 +140,7 @@ curl -X POST http://10.70.247.28:8050/api/documents/extractions \
   -d '{
     "filename": "公文.pdf",
     "content_base64": "'"$(base64 -w0 /path/to/公文.pdf)"'",
-    "model_name": "qwen3.5-397b"
+    "model_name": "qwen2.5-72b"
   }'
 ```
 
@@ -148,7 +148,7 @@ curl -X POST http://10.70.247.28:8050/api/documents/extractions \
 
 ```powershell
 $fileBase64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes('C:\path\to\公文.pdf'))
-$body = @{ filename="公文.pdf"; content_base64=$fileBase64; model_name="qwen3.5-397b" } | ConvertTo-Json
+$body = @{ filename="公文.pdf"; content_base64=$fileBase64; model_name="qwen2.5-72b" } | ConvertTo-Json
 Invoke-RestMethod -Uri "http://10.70.247.28:8050/api/documents/extractions" -Method Post -Body $body -ContentType "application/json"
 ```
 
@@ -162,7 +162,7 @@ with open("公文.pdf", "rb") as f:
 
 resp = requests.post(
     "http://10.70.247.28:8050/api/documents/extractions",
-    json={"filename": "公文.pdf", "content_base64": b64, "model_name": "qwen3.5-397b"},
+    json={"filename": "公文.pdf", "content_base64": b64, "model_name": "qwen2.5-72b"},
     timeout=300,
 )
 print(resp.json())
