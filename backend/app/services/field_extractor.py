@@ -12,8 +12,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 import requests
 
-FIELD_EXTRACT_TIMEOUT = float(os.getenv("FIELD_EXTRACT_TIMEOUT", "240"))
-
 
 # 预定义模型配置（使用h3i平台）
 AVAILABLE_MODELS = {
@@ -230,7 +228,7 @@ class FieldExtractor:
                     "temperature": 0.1,
                     "max_tokens": 2000
                 },
-                timeout=FIELD_EXTRACT_TIMEOUT
+                timeout=120
             )
 
             if response.status_code == 200:

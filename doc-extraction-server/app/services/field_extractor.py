@@ -6,13 +6,10 @@
 
 import json
 import re
-import os
 from typing import Dict, List
 from dataclasses import dataclass, field
 from pathlib import Path
 import requests
-
-FIELD_EXTRACT_TIMEOUT = float(os.getenv("FIELD_EXTRACT_TIMEOUT", "240"))
 
 
 # 预定义模型配置（从 test_and_call_models.py 和 test_qwen.py 收集）
@@ -253,7 +250,7 @@ class FieldExtractor:
                     "temperature": 0.1,
                     "max_tokens": 2000
                 },
-                timeout=FIELD_EXTRACT_TIMEOUT
+                timeout=120
             )
 
             if response.status_code == 200:
