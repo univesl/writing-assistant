@@ -2,7 +2,7 @@ import axios from './axiosConfig'
 
 export const uploadApi = {
   // 上传文件到指定会话
-  uploadFile: async (sessionId, file, autoParse = true, autoExtract = false, modelName = 'qwen2.5-72b') => {
+  uploadFile: async (sessionId, file, autoParse = true, autoExtract = false, modelName = 'qwen3.5-397b') => {
     const formData = new FormData()
     formData.append('file', file)
     formData.append('auto_parse', autoParse)
@@ -32,7 +32,7 @@ export const uploadApi = {
   },
 
   // 提取文件字段
-  extractFields: async (fileId, modelName = 'qwen2.5-72b') => {
+  extractFields: async (fileId, modelName = 'qwen3.5-397b') => {
     const formData = new FormData()
     formData.append('model_name', modelName)
 

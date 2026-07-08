@@ -83,7 +83,7 @@ def parse_document(file_path: Path) -> Optional[str]:
         return None
 
 
-def extract_fields_from_content(content: str, model_name: str = "qwen2.5-72b") -> Dict[str, str]:
+def extract_fields_from_content(content: str, model_name: str = "qwen3.5-397b") -> Dict[str, str]:
     """
     从文档内容提取字段
     """

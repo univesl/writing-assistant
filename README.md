@@ -1,6 +1,6 @@
 # AI 写作助手
 
-一个基于 React + FastAPI 的智能公文写作辅助工具，支持快速写作、参考写作、模板管理等功能。集成 h3i 平台 Qwen2.5-72B-Instruct 模型生成能力和 KnG 知识图谱 RAG 检索。
+一个基于 React + FastAPI 的智能公文写作辅助工具，支持快速写作、参考写作、模板管理等功能。集成 h3i 平台 Qwen3.5-397B-A17B 模型生成能力和 KnG 知识图谱 RAG 检索。
 
 ## 功能特性
 
@@ -34,7 +34,7 @@
 ### 后端
 - **框架**：FastAPI
 - **数据库**：SQLite（SQLAlchemy ORM）
-- **AI 模型**：Qwen2.5-72B-Instruct（h3i 平台）
+- **AI 模型**：Qwen3.5-397B-A17B（h3i 平台）
 - **PDF 解析**：MinerU API（mineru.net）
 - **RAG 引擎**：KnG 知识图谱检索（服务器端）
 - **文档转换**：Pandoc（docx 解析 + 导出）

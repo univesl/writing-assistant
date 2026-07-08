@@ -382,7 +382,7 @@ function App() {
     const generationSessionId = currentSession.id
 
     try {
-      const DEFAULT_MODEL = 'Qwen2.5-72B-Instruct'
+      const DEFAULT_MODEL = 'Qwen3.5-397B-A17B'
       const { writingMode, templateType, quickRequirements, referenceDocuments, referenceWriteType, referenceRequirements, useRag } = config
 
       // 构建用户显示内容

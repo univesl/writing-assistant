@@ -15,6 +15,11 @@ import requests
 
 # 预定义模型配置（使用h3i平台）
 AVAILABLE_MODELS = {
+    "qwen3.5-397b": {
+        "model": "Qwen3.5-397B-A17B",
+        "base_url": os.getenv("MODEL_API_BASE", "http://model.ic.h3i.buaa.edu.cn") + "/v1",
+        "api_key": os.getenv("MODEL_API_KEY", "")
+    },
     "qwen2.5-72b": {
         "model": "Qwen2.5-72B-Instruct",
         "base_url": os.getenv("MODEL_API_BASE", "http://model.ic.h3i.buaa.edu.cn") + "/v1",
@@ -94,11 +99,10 @@ class FieldExtractor:
         """通过模型名称快速创建提取器
         
         Args:
-            model_name: 模型名称，默认使用 qwen2.5-72b (Qwen2.5-72B-Instruct)
+            model_name: 模型名称，默认使用 qwen3.5-397b (Qwen3.5-397B-A17B)
         """
-        # 默认使用 Qwen2.5-72B 模型（与文档生成保持一致）
         if model_name is None:
-            model_name = "qwen2.5-72b"
+            model_name = "qwen3.5-397b"
         
         if model_name not in AVAILABLE_MODELS:
             raise ValueError(f"未知模型: {model_name}. 可用模型: {list(AVAILABLE_MODELS.keys())}")
@@ -216,7 +220,7 @@ class FieldExtractor:
                     "Content-Type": "application/json"
                 },
                 json={
-                    "model": self.llm_config.get("model", "xhang_nlp_qwen2.5-72b"),
+                    "model": self.llm_config.get("model", "Qwen3.5-397B-A17B"),
                     "messages": [
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": truncated}

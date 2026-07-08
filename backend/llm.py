@@ -17,7 +17,7 @@ load_dotenv()
 
 LLM_API_URL = os.getenv("LLM_API_URL", "http://model.ic.h3i.buaa.edu.cn/v1")
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
-LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "Qwen2.5-72B-Instruct")
+LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "Qwen3.5-397B-A17B")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

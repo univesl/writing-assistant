@@ -23,7 +23,7 @@ class DocumentParseError(Exception):
 def extract_from_base64(
     filename: str,
     content_base64: str,
-    model_name: str = "qwen2.5-72b",
+    model_name: str = "qwen3.5-397b",
     include_parsed_content: bool = False,
 ) -> dict:
     if not is_supported_file(filename):

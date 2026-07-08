@@ -15,7 +15,7 @@ from .prompt_builder import build_prompt
 async def generate_document_async(
     topic: str,
     requirements: str = "",
-    model_name: str = "qwen2.5-72b",
+    model_name: str = "Qwen3.5-397B-A17B",
     use_knowledge_base: bool = True,
     retrieval_mode: str = "local",
     top_k: int = 60,
@@ -103,7 +103,7 @@ async def generate_document_async(
 # LLM API 配置（使用h3i平台）
 MODEL_API_BASE = os.getenv("MODEL_API_BASE", "http://model.ic.h3i.buaa.edu.cn")
 MODEL_API_KEY = os.getenv("MODEL_API_KEY", "")
-DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "Qwen2.5-72B-Instruct")
+DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "Qwen3.5-397B-A17B")
 
 
 def _call_llm_with_messages(messages: list, model_name: str) -> str:
@@ -146,7 +146,8 @@ def _call_llm_with_messages(messages: list, model_name: str) -> str:
 def list_available_models() -> List[Dict[str, str]]:
     """获取可用的模型列表"""
     return [
-        {"id": "Qwen2.5-72B-Instruct", "name": "Qwen2.5-72B (统一模型)"},
+        {"id": "Qwen3.5-397B-A17B", "name": "Qwen3.5-397B (默认)"},
+        {"id": "Qwen2.5-72B-Instruct", "name": "Qwen2.5-72B"},
     ]
 
 
