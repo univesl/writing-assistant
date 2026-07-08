@@ -316,7 +316,8 @@ def export_document(session_id: int, background_tasks: BackgroundTasks, export_t
         return err(500, f"导出文档失败: {str(e)}")
 
 
-GUARD_API_URL = "http://10.70.247.28:8006/guard"
+GUARD_API_URL = os.getenv("GUARD_API_URL", "http://10.70.247.28:8006/guard")
+GUARD_API_TIMEOUT = float(os.getenv("GUARD_API_TIMEOUT", "30"))
 
 
 @router.post("/guard")
@@ -331,7 +332,7 @@ def check_content_guard(data: GuardCheckIn):
         response = requests.post(
             GUARD_API_URL,
             json={"text": data.text},
-            timeout=30
+            timeout=GUARD_API_TIMEOUT
         )
         response.raise_for_status()
         result = response.json()

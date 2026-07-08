@@ -1,4 +1,5 @@
 import sys
+import asyncio
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -7,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.routers.write import _retrieve_rag_content
 from app.schemas import WriteQuickIn
+from app.services.document_generator import retrieve_knowledge_base_content
 from app.services.kng_rag_service import KnGRAGService
 
 
@@ -122,6 +124,29 @@ class WriteRAGFallbackTest(unittest.TestCase):
 
         self.assertEqual(content, "")
         self.assertEqual(references, [])
+
+
+class GenerateRetrieveContractTest(unittest.TestCase):
+    def test_retrieve_accepts_router_ranking_parameters(self):
+        service = Mock()
+        service.is_ready.return_value = True
+        service.retrieve_for_document_generation.return_value = {"content": "ok"}
+
+        with patch("app.services.document_generator.get_kng_rag_service", return_value=service):
+            result = asyncio.run(
+                retrieve_knowledge_base_content(
+                    topic="query",
+                    mode="hybrid",
+                    top_k=60,
+                    chunk_top_k=5,
+                )
+            )
+
+        self.assertEqual(result["content"], "ok")
+        service.retrieve_for_document_generation.assert_called_once_with(
+            topic="query",
+            mode="hybrid",
+        )
 
 
 if __name__ == "__main__":

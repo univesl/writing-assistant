@@ -15,6 +15,19 @@ from ..services.official_document_extractor import (
 router = APIRouter(prefix="/documents", tags=["documents"])
 
 
+@router.get("/models")
+def list_available_models():
+    return [
+        {
+            "name": name,
+            "display_name": name,
+            "model": config.get("model", name),
+            "base_url": config.get("base_url", ""),
+        }
+        for name, config in AVAILABLE_MODELS.items()
+    ]
+
+
 @router.post("/extractions", response_model=DocumentExtractionOut, status_code=status.HTTP_201_CREATED)
 def create_document_extraction(request: DocumentExtractionIn):
     try:

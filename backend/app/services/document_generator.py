@@ -153,6 +153,8 @@ def list_available_models() -> List[Dict[str, str]]:
 async def retrieve_knowledge_base_content(
     topic: str,
     mode: str = "local",
+    top_k: int = 60,
+    chunk_top_k: int = 5,
 ) -> Dict[str, Any]:
     """
     直接检索知识库内容

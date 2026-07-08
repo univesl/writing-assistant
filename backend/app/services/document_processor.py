@@ -17,7 +17,7 @@ from ..services.mineru_service import mineru_service
 
 
 # 会话文件存储根目录（与 KNG 的持久化知识库分开）
-SESSION_FILES_ROOT = Path("/home/liubin/writing-assistant/session_files")
+SESSION_FILES_ROOT = Path(os.getenv("SESSION_FILES_ROOT", "/home/liubin/writing-assistant/session_files"))
 
 
 def ensure_session_dir(session_id: int) -> Path:

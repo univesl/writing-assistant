@@ -1,7 +1,9 @@
+import os
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
-DB_URL = "sqlite:///./writing_assistant.db"
+DB_URL = os.getenv("DATABASE_URL", "sqlite:///./writing_assistant.db")
 
 engine = create_engine(
     DB_URL,

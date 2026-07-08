@@ -12,6 +12,8 @@ from pathlib import Path
 
 # KnG 服务配置
 KNG_BASE_URL = os.getenv("KNG_BASE_URL", "http://127.0.0.1:50001")
+KNG_STATUS_TIMEOUT = float(os.getenv("KNG_STATUS_TIMEOUT", "5"))
+KNG_QUERY_TIMEOUT = float(os.getenv("KNG_QUERY_TIMEOUT", "120"))
 
 
 class KnGRAGService:
@@ -24,7 +26,7 @@ class KnGRAGService:
     def is_ready(self) -> bool:
         """检查服务是否就绪"""
         try:
-            response = requests.get(f"{self.base_url}/api/status", timeout=5)
+            response = requests.get(f"{self.base_url}/api/status", timeout=KNG_STATUS_TIMEOUT)
             return response.status_code == 200
         except Exception as e:
             print(f"[KnG RAG] Service not ready: {e}")
@@ -79,7 +81,7 @@ class KnGRAGService:
         
         try:
             api_start = time.time()
-            response = requests.post(url, json=payload, timeout=15)
+            response = requests.post(url, json=payload, timeout=KNG_QUERY_TIMEOUT)
             api_time = time.time() - api_start
             print(f"[KnG RAG] API请求耗时: {api_time:.2f}s")
             
