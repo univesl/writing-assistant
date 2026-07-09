@@ -1,4 +1,5 @@
 import asyncio
+import time
 from typing import AsyncGenerator, Literal, List, Dict, Union
 import sys
 import os
@@ -9,6 +10,14 @@ from llm import LLMAPIClient, get_llm_client
 
 DEFAULT_MODEL = "qwen"
 _clients = {}
+_STREAM_END = object()
+
+
+def _next_stream_chunk(stream_gen):
+    try:
+        return next(stream_gen)
+    except StopIteration:
+        return _STREAM_END
 
 
 def get_client(model_type: str = None):
@@ -56,13 +65,22 @@ async def stream_text_from_llm(
         
         stream_gen = await loop.run_in_executor(None, sync_stream)
         
+        start_time = time.perf_counter()
+        first_chunk_time = None
         chunk_count = 0
-        for chunk in stream_gen:
+        while True:
+            chunk = await loop.run_in_executor(None, _next_stream_chunk, stream_gen)
+            if chunk is _STREAM_END:
+                break
             chunk_count += 1
             if chunk:
+                if first_chunk_time is None:
+                    first_chunk_time = time.perf_counter()
+                    print(f"[LLM] first chunk after {first_chunk_time - start_time:.2f}s")
                 yield chunk
         
-        print(f"[LLM] 流式调用完成，chunks={chunk_count}")
+        total_time = time.perf_counter() - start_time
+        print(f"[LLM] stream complete, chunks={chunk_count}, total={total_time:.2f}s")
     except Exception as e:
         print(f"[LLM] 调用失败：{e}")
         import traceback
