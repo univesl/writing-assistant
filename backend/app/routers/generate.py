@@ -3,6 +3,8 @@
 基于 KnG RAG 检索生成公文
 """
 
+import os
+
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session as OrmSession
@@ -22,13 +24,14 @@ from ..services.document_generator import (
 )
 
 router = APIRouter(prefix="/generate", tags=["generate"])
+DEFAULT_GENERATION_MODEL = os.getenv("LLM_MODEL_NAME") or os.getenv("DEFAULT_MODEL", "Qwen2.5-72B-Instruct")
 
 
 class GenerateRequest(BaseModel):
     """文档生成请求"""
     topic: str
     requirements: str = ""
-    model_name: str = "Qwen2.5-72B-Instruct"  # 默认使用快速模型
+    model_name: str = DEFAULT_GENERATION_MODEL
     use_knowledge_base: bool = True
     retrieval_mode: str = "local"  # local, global, hybrid, mix, naive
     top_k: int = 60

@@ -6,46 +6,42 @@
 
 import json
 import re
+import os
 from typing import Dict, List
 from dataclasses import dataclass, field
 from pathlib import Path
 import requests
+from dotenv import load_dotenv
+
+
+load_dotenv()
 
 
 # 预定义模型配置（从 test_and_call_models.py 和 test_qwen.py 收集）
+def _field_base_url() -> str:
+    api_url = os.getenv("FIELD_EXTRACTION_API_URL") or os.getenv("LLM_API_URL")
+    if api_url:
+        return api_url.rstrip("/")
+    base = os.getenv("FIELD_EXTRACTION_API_BASE") or os.getenv("MODEL_API_BASE", "http://model.ic.h3i.buaa.edu.cn")
+    base = base.rstrip("/")
+    return base if base.endswith("/v1") else f"{base}/v1"
+
+
+FIELD_EXTRACTION_MODEL_ID = os.getenv("FIELD_EXTRACTION_MODEL_ID", "qwen2.5-72b")
+FIELD_EXTRACTION_MODEL_NAME = (
+    os.getenv("FIELD_EXTRACTION_MODEL_NAME")
+    or os.getenv("LLM_MODEL_NAME")
+    or os.getenv("DEFAULT_MODEL", "Qwen2.5-72B-Instruct")
+)
+FIELD_EXTRACTION_API_KEY = os.getenv("FIELD_EXTRACTION_API_KEY") or os.getenv("LLM_API_KEY") or os.getenv("MODEL_API_KEY", "")
+FIELD_EXTRACTION_TIMEOUT = float(os.getenv("FIELD_EXTRACTION_TIMEOUT", os.getenv("LLM_REQUEST_TIMEOUT", "120")))
+
+
 AVAILABLE_MODELS = {
-    # 原配置
-    "qwen2.5-72b": {
-        "model": "xhang_nlp_qwen2.5-72b",
-        "base_url": "http://10.70.247.113:4000/v1",
-        "api_key": "sk-ofd5T_1rbfsa4JJxMI38HQ"
-    },
-    # test_qwen.py 中的模型
-    "qwen3-235b": {
-        "model": "Qwen/Qwen3-235B-A22B-Instruct-2507-FP8",
-        "base_url": "http://10.70.247.113:4000/v1",
-        "api_key": "sk-I8oiGaYzHqcIXhjKz7D0fQ"
-    },
-    # test_and_call_models.py 中的模型
-    "qwen3-235b-h3i": {
-        "model": "Qwen3-235B-A22B-Instruct-2507",
-        "base_url": "http://model.ic.h3i.buaa.edu.cn/v1",
-        "api_key": "4QrJphMpZvfeeN5dgPa4eJVoRJVvXEDjbCK1wjR7SFgNupgh"
-    },
-    "qwen3.5-397b": {
-        "model": "Qwen3.5-397B-A17B",
-        "base_url": "http://model.ic.h3i.buaa.edu.cn/v1",
-        "api_key": "4QrJphMpZvfeeN5dgPa4eJVoRJVvXEDjbCK1wjR7SFgNupgh"
-    },
-    "qwen2.5-72b-h3i": {
-        "model": "Qwen2.5-72B-Instruct",
-        "base_url": "http://model.ic.h3i.buaa.edu.cn/v1",
-        "api_key": "4QrJphMpZvfeeN5dgPa4eJVoRJVvXEDjbCK1wjR7SFgNupgh"
-    },
-    "deepseek-r1-70b": {
-        "model": "DeepSeek-R1-Distill-Llama-70B",
-        "base_url": "http://model.ic.h3i.buaa.edu.cn/v1",
-        "api_key": "4QrJphMpZvfeeN5dgPa4eJVoRJVvXEDjbCK1wjR7SFgNupgh"
+    FIELD_EXTRACTION_MODEL_ID: {
+        "model": FIELD_EXTRACTION_MODEL_NAME,
+        "base_url": _field_base_url(),
+        "api_key": FIELD_EXTRACTION_API_KEY
     },
 }
 
@@ -121,11 +117,11 @@ class FieldExtractor:
         """通过模型名称快速创建提取器
         
         Args:
-            model_name: 模型名称，默认使用 qwen3-235b-h3i (Qwen3-235B-A22B-Instruct-2507)
+            model_name: 模型名称，默认使用 FIELD_EXTRACTION_MODEL_ID 配置的模型
         """
-        # 默认使用 Qwen3-235B 模型（与文档生成保持一致）
+        # 默认使用 .env 中配置的字段提取模型
         if model_name is None:
-            model_name = "qwen3-235b-h3i"
+            model_name = FIELD_EXTRACTION_MODEL_ID
         
         if model_name not in AVAILABLE_MODELS:
             raise ValueError(f"未知模型: {model_name}. 可用模型: {list(AVAILABLE_MODELS.keys())}")
@@ -251,7 +247,7 @@ class FieldExtractor:
                     "temperature": 0.1,
                     "max_tokens": 2000
                 },
-                timeout=120
+                timeout=FIELD_EXTRACTION_TIMEOUT
             )
 
             if response.status_code == 200:

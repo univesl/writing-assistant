@@ -14,11 +14,30 @@ import requests
 
 
 # 预定义模型配置（使用h3i平台）
+def _field_base_url() -> str:
+    api_url = os.getenv("FIELD_EXTRACTION_API_URL") or os.getenv("LLM_API_URL")
+    if api_url:
+        return api_url.rstrip("/")
+    base = os.getenv("FIELD_EXTRACTION_API_BASE") or os.getenv("MODEL_API_BASE", "http://model.ic.h3i.buaa.edu.cn")
+    base = base.rstrip("/")
+    return base if base.endswith("/v1") else f"{base}/v1"
+
+
+FIELD_EXTRACTION_MODEL_ID = os.getenv("FIELD_EXTRACTION_MODEL_ID", "qwen2.5-72b")
+FIELD_EXTRACTION_MODEL_NAME = (
+    os.getenv("FIELD_EXTRACTION_MODEL_NAME")
+    or os.getenv("LLM_MODEL_NAME")
+    or os.getenv("DEFAULT_MODEL", "Qwen2.5-72B-Instruct")
+)
+FIELD_EXTRACTION_API_KEY = os.getenv("FIELD_EXTRACTION_API_KEY") or os.getenv("LLM_API_KEY") or os.getenv("MODEL_API_KEY", "")
+FIELD_EXTRACTION_TIMEOUT = float(os.getenv("FIELD_EXTRACTION_TIMEOUT", os.getenv("LLM_REQUEST_TIMEOUT", "120")))
+
+
 AVAILABLE_MODELS = {
-    "qwen2.5-72b": {
-        "model": "Qwen2.5-72B-Instruct",
-        "base_url": os.getenv("MODEL_API_BASE", "http://model.ic.h3i.buaa.edu.cn") + "/v1",
-        "api_key": os.getenv("MODEL_API_KEY", "")
+    FIELD_EXTRACTION_MODEL_ID: {
+        "model": FIELD_EXTRACTION_MODEL_NAME,
+        "base_url": _field_base_url(),
+        "api_key": FIELD_EXTRACTION_API_KEY
     },
 }
 
@@ -98,7 +117,7 @@ class FieldExtractor:
         """
         # 默认使用 Qwen2.5-72B 模型（与文档生成保持一致）
         if model_name is None:
-            model_name = "qwen2.5-72b"
+            model_name = FIELD_EXTRACTION_MODEL_ID
         
         if model_name not in AVAILABLE_MODELS:
             raise ValueError(f"未知模型: {model_name}. 可用模型: {list(AVAILABLE_MODELS.keys())}")
@@ -224,7 +243,7 @@ class FieldExtractor:
                     "temperature": 0.1,
                     "max_tokens": 2000
                 },
-                timeout=120
+                timeout=FIELD_EXTRACTION_TIMEOUT
             )
 
             if response.status_code == 200:

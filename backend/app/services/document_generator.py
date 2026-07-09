@@ -101,15 +101,25 @@ async def generate_document_async(
 
 
 # LLM API 配置（使用h3i平台）
-MODEL_API_BASE = os.getenv("MODEL_API_BASE", "http://model.ic.h3i.buaa.edu.cn")
-MODEL_API_KEY = os.getenv("MODEL_API_KEY", "")
-DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "Qwen2.5-72B-Instruct")
+def _chat_api_url() -> str:
+    api_url = os.getenv("LLM_API_URL")
+    if api_url:
+        return api_url.rstrip("/")
+    base = os.getenv("MODEL_API_BASE", "http://model.ic.h3i.buaa.edu.cn").rstrip("/")
+    return base if base.endswith("/v1") else f"{base}/v1"
+
+
+MODEL_API_URL = _chat_api_url()
+MODEL_API_KEY = os.getenv("LLM_API_KEY") or os.getenv("MODEL_API_KEY", "")
+DEFAULT_MODEL = os.getenv("LLM_MODEL_NAME") or os.getenv("DEFAULT_MODEL", "Qwen2.5-72B-Instruct")
+MODEL_REQUEST_TIMEOUT = float(os.getenv("LLM_REQUEST_TIMEOUT", os.getenv("MODEL_REQUEST_TIMEOUT", "120")))
+MODEL_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", os.getenv("MODEL_MAX_TOKENS", "4000")))
 
 
 def _call_llm_with_messages(messages: list, model_name: str) -> str:
     """调用大模型生成内容（使用 messages 列表）"""
     try:
-        url = f"{MODEL_API_BASE}/v1/chat/completions"
+        url = f"{MODEL_API_URL}/chat/completions"
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {MODEL_API_KEY}"
@@ -120,12 +130,12 @@ def _call_llm_with_messages(messages: list, model_name: str) -> str:
         payload = {
             "model": model,
             "messages": messages,
-            "max_tokens": 4000,
+            "max_tokens": MODEL_MAX_TOKENS,
             "temperature": 0.7
         }
         
         print(f"[文档生成] 调用模型: {model}")
-        response = requests.post(url, headers=headers, json=payload, timeout=120)
+        response = requests.post(url, headers=headers, json=payload, timeout=MODEL_REQUEST_TIMEOUT)
         response.raise_for_status()
         
         result = response.json()
@@ -146,7 +156,7 @@ def _call_llm_with_messages(messages: list, model_name: str) -> str:
 def list_available_models() -> List[Dict[str, str]]:
     """获取可用的模型列表"""
     return [
-        {"id": "Qwen2.5-72B-Instruct", "name": "Qwen2.5-72B (统一模型)"},
+        {"id": DEFAULT_MODEL, "name": DEFAULT_MODEL},
     ]
 
 
@@ -196,7 +206,7 @@ async def _call_llm_stream(prompt, model_name):
     """
     import asyncio
     
-    url = f"{MODEL_API_BASE}/v1/chat/completions"
+    url = f"{MODEL_API_URL}/chat/completions"
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {MODEL_API_KEY}"
@@ -210,7 +220,7 @@ async def _call_llm_stream(prompt, model_name):
             {"role": "system", "content": "你是一位精通北航（北京航空航天大学）公文写作的专家。你的任务是根据用户提供的主题和要求，以**北航真实公文**为参考标准，撰写正式、规范的公文。\n\n核心原则：\n1. 严格参照北航真实公文的文风、用语习惯和格式规范\n2. 公文体裁涵盖：通知、报告、请示、函、纪要、批复、决定、意见等\n3. 语言严谨、准确、简练，体现高校行政公文的正式性和权威性\n4. 保持客观中立的官方口吻，避免主观评价性语言\n5. 落款居右，发文单位在上、日期在下，日期用中文数字"},
             {"role": "user", "content": prompt}
         ],
-        "max_tokens": 4000,
+        "max_tokens": MODEL_MAX_TOKENS,
         "temperature": 0.7,
         "stream": True
     }
@@ -221,7 +231,7 @@ async def _call_llm_stream(prompt, model_name):
     
     def _sync_request():
         try:
-            response = requests.post(url, headers=headers, json=payload, stream=True, timeout=180)
+            response = requests.post(url, headers=headers, json=payload, stream=True, timeout=MODEL_REQUEST_TIMEOUT)
             response.raise_for_status()
             response.encoding = 'utf-8'
             

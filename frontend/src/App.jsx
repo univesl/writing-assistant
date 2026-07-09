@@ -382,7 +382,6 @@ function App() {
     const generationSessionId = currentSession.id
 
     try {
-      const DEFAULT_MODEL = 'Qwen2.5-72B-Instruct'
       const { writingMode, templateType, quickRequirements, referenceDocuments, referenceWriteType, referenceRequirements, useRag } = config
 
       // 构建用户显示内容
@@ -497,7 +496,6 @@ function App() {
             generate_type: referenceWriteType,
             topic: referenceRequirements.trim() || uploadDoc.filename || '',
             requirements: referenceRequirements.trim() || '',
-            model_name: DEFAULT_MODEL,
             use_knowledge_base: false,
             top_k: 3
           })

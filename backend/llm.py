@@ -15,9 +15,20 @@ except ImportError:
 
 load_dotenv()
 
-LLM_API_URL = os.getenv("LLM_API_URL", "http://model.ic.h3i.buaa.edu.cn/v1")
-LLM_API_KEY = os.getenv("LLM_API_KEY", "")
-LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "Qwen2.5-72B-Instruct")
+
+def _chat_base_url() -> str:
+    api_url = os.getenv("LLM_API_URL")
+    if api_url:
+        return api_url.rstrip("/")
+    base = os.getenv("MODEL_API_BASE", "http://model.ic.h3i.buaa.edu.cn").rstrip("/")
+    return base if base.endswith("/v1") else f"{base}/v1"
+
+
+LLM_API_URL = _chat_base_url()
+LLM_API_KEY = os.getenv("LLM_API_KEY") or os.getenv("MODEL_API_KEY", "")
+LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME") or os.getenv("DEFAULT_MODEL", "Qwen2.5-72B-Instruct")
+LLM_REQUEST_TIMEOUT = float(os.getenv("LLM_REQUEST_TIMEOUT", os.getenv("MODEL_REQUEST_TIMEOUT", "120")))
+LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", os.getenv("MODEL_MAX_TOKENS", "4000")))
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -36,7 +47,7 @@ class LLMAPIClient:
         self.client = OpenAI(
             api_key=self.api_key,
             base_url=self.api_url,
-            timeout=30.0,
+            timeout=LLM_REQUEST_TIMEOUT,
             max_retries=0,
         )
         logger.info(f"LLM客户端初始化完成，API地址: {self.api_url}")
@@ -55,7 +66,7 @@ class LLMAPIClient:
                 model=self.model_name,
                 messages=messages,
                 temperature=0.7,
-                max_tokens=2000,
+                max_tokens=LLM_MAX_TOKENS,
                 stream=True
             )
             
@@ -75,7 +86,7 @@ class LLMAPIClient:
                 model=self.model_name,
                 messages=messages,
                 temperature=0.7,
-                max_tokens=4000,
+                max_tokens=LLM_MAX_TOKENS,
                 stream=True
             )
             
@@ -95,7 +106,7 @@ class LLMAPIClient:
                 model=self.model_name,
                 messages=messages,
                 temperature=0.7,
-                max_tokens=2000,
+                max_tokens=LLM_MAX_TOKENS,
                 stream=False
             )
             
