@@ -8,7 +8,18 @@ import StartPage from './components/StartPage'
 import { sessionApi } from './api/sessionApi'
 import { writeApi } from './api/writeApi'
 import { extractArticlePreview, parseGeneratedOutput } from './utils/generatedOutput'
+import { formatSessionTime } from './utils/sessionTime'
 import { streamQuickWrite } from './services/writeStream'
+
+const getGenerationMessage = ({ writingMode, useRag }) => {
+  if (writingMode === 'reference') {
+    return '正在解析参考文档并生成公文，请稍候…'
+  }
+  if (useRag) {
+    return '正在检索知识库并生成公文，请稍候…'
+  }
+  return '正在生成公文，请稍候…'
+}
 
 function App() {
   // 当前选中的会话ID
@@ -34,6 +45,7 @@ function App() {
 
   // 生成中状态
   const [isGenerating, setIsGenerating] = useState(false)
+  const [generationMessage, setGenerationMessage] = useState('')
 
   // 用于跟踪组件是否已挂载，避免竞态条件
   const isMountedRef = useRef(true)
@@ -72,7 +84,7 @@ function App() {
         const sessionList = response.map(session => ({
           id: session.session_id,
           name: session.session_name,
-          updatedAt: new Date(session.created_at).toLocaleString()
+          createdAt: formatSessionTime(session.created_at)
         }))
         setSessions(sessionList)
         console.log('sessionList:', sessionList)
@@ -191,7 +203,7 @@ function App() {
       const newSession = {
         id: response.session_id,
         name: response.session_name,
-        updatedAt: response.created_at
+        createdAt: formatSessionTime(response.created_at)
       }
 
       // 更新会话列表
@@ -211,7 +223,7 @@ function App() {
       const mockSession = {
         id: Date.now(),
         name: '新会话',
-        updatedAt: new Date().toLocaleString()
+        createdAt: formatSessionTime(new Date())
       }
       setSessions([mockSession, ...sessions])
       sessionLoadIdRef.current += 1
@@ -378,6 +390,7 @@ function App() {
   // 处理从 StartPage 发起的生成请求
   const handleStartGeneration = async (config) => {
     if (!currentSession || isGenerating) return
+    setGenerationMessage(getGenerationMessage(config))
     setIsGenerating(true)
     const generationSessionId = currentSession.id
 
@@ -446,6 +459,9 @@ function App() {
           fallbackSummary: '已生成文章',
           onArticle: (liveArticle) => {
             if (generationSessionId === currentSessionIdRef.current) {
+              if (liveArticle) {
+                setGenerationMessage('正在生成正文，内容将持续显示…')
+              }
               setCurrentSessionOutput(liveArticle)
               setEditorRealtimeContent(liveArticle)
             }
@@ -520,6 +536,7 @@ function App() {
 
           const liveArticle = extractArticlePreview(fullContent)
           if (liveArticle && generationSessionId === currentSessionIdRef.current) {
+            setGenerationMessage('正在生成正文，内容将持续显示…')
             setCurrentSessionOutput(liveArticle)
             setEditorRealtimeContent(liveArticle)
           }
@@ -553,6 +570,7 @@ function App() {
       alert('生成失败: ' + (error.message || '未知错误'))
     } finally {
       setIsGenerating(false)
+      setGenerationMessage('')
     }
   }
 
@@ -594,6 +612,21 @@ function App() {
   return (
     <div className="app-container">
       <TopNav />
+      {isGenerating && (
+        <div
+          className="generation-status"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          data-testid="generation-status"
+        >
+          <span className="generation-status-spinner" aria-hidden="true" />
+          <div className="generation-status-copy">
+            <strong>正在生成</strong>
+            <span>{generationMessage}</span>
+          </div>
+        </div>
+      )}
       <div className={`main-layout ${isSidebarOpen ? '' : 'sidebar-closed'}`}>
         <Sidebar
           sessions={sessions}

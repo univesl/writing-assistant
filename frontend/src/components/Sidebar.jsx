@@ -90,7 +90,9 @@ function Sidebar({ sessions, currentSession, onSessionChange, onNewSession, onDe
                 </div>
               </div>
             )}
-            <div className="session-time">{session.updatedAt}</div>
+            <div className="session-time" title={`创建时间：${session.createdAt}`}>
+              {session.createdAt}
+            </div>
           </div>
         ))}
       </div>
