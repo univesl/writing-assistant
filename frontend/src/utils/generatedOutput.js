@@ -32,6 +32,35 @@ export function parseGeneratedOutput(output, fallbackSummary = '已生成文章'
   }
 }
 
+export function parseSelectionEditOutput(output, fallbackSummary = '已完成选区修改') {
+  const replacementMarker = '---REPLACEMENT---'
+  const summaryMarker = '---SUMMARY---'
+  const deletionMarker = '[[DELETE_SELECTION]]'
+  const replacementIndex = output.indexOf(replacementMarker)
+  const summaryIndex = output.indexOf(summaryMarker)
+
+  if (replacementIndex < 0 || summaryIndex < 0 || summaryIndex < replacementIndex) {
+    throw new Error('AI 返回格式异常，未获得可安全应用的选区替换内容')
+  }
+
+  const rawReplacement = output
+    .slice(replacementIndex + replacementMarker.length, summaryIndex)
+    .trim()
+  const summaryContent = output.slice(summaryIndex + summaryMarker.length).trim() || fallbackSummary
+  const isDeletion = rawReplacement.length === 0 || rawReplacement === deletionMarker
+  const replacementMarkdown = isDeletion ? '' : rawReplacement
+
+  if (replacementMarkdown.includes('---ARTICLE---')) {
+    throw new Error('AI 错误返回了整篇文章，已拒绝覆盖编辑器内容')
+  }
+
+  return {
+    replacementMarkdown,
+    summaryContent,
+    isDeletion,
+  }
+}
+
 export function appendKnowledgeSources(summary, references = []) {
   const uniqueReferences = [...new Set(
     references.filter(Boolean).map(reference => String(reference).trim()).filter(Boolean)

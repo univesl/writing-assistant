@@ -102,6 +102,8 @@ function AiEditDialog({
           className="ai-edit-close"
           onMouseDown={(e) => e.stopPropagation()}
           onClick={onCancel}
+          disabled={isSubmitting}
+          aria-label="关闭 AI 修改"
         >
           ×
         </button>
@@ -114,6 +116,7 @@ function AiEditDialog({
           placeholder="输入修改要求，如：改得更正式、删除这一段、扩写为一小段..."
           rows={3}
           disabled={isSubmitting}
+          autoFocus
         />
         {error && (
           <div className="ai-edit-error">{error}</div>

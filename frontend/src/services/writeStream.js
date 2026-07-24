@@ -1,4 +1,9 @@
-import { appendSseChunk, extractArticlePreview, parseGeneratedOutput } from '../utils/generatedOutput'
+import {
+  appendSseChunk,
+  extractArticlePreview,
+  parseGeneratedOutput,
+  parseSelectionEditOutput,
+} from '../utils/generatedOutput'
 
 export async function streamQuickWrite({
   payload,
@@ -62,6 +67,63 @@ export async function streamQuickWrite({
       rag: metadata.rag,
       ...parseGeneratedOutput(output, fallbackSummary),
     }
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId)
+  }
+}
+
+export async function streamSelectionEdit({
+  payload,
+  signal,
+  timeoutMs = 120000,
+  fallbackSummary = '已完成选区修改',
+}) {
+  const controller = !signal && timeoutMs ? new AbortController() : null
+  const timeoutId = controller ? setTimeout(() => controller.abort(), timeoutMs) : null
+
+  try {
+    const response = await fetch('/api/write/edit-selection', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: signal || controller?.signal,
+      body: JSON.stringify(payload),
+    })
+
+    if (!response.ok) {
+      throw new Error(`请求失败: ${response.status}`)
+    }
+
+    if (!response.body?.getReader) {
+      throw new Error('浏览器不支持流式读取响应')
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder('utf-8')
+    let buffer = ''
+    let output = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      const parsed = appendSseChunk(buffer, output, value, decoder)
+      buffer = parsed.buffer
+      output = parsed.output
+    }
+
+    if (!output.trim() || output.trimStart().startsWith('生成失败：')) {
+      throw new Error(output.trim() || 'AI 未返回可用内容')
+    }
+
+    return {
+      output,
+      ...parseSelectionEditOutput(output, fallbackSummary),
+    }
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new Error('AI 修改超过2分钟，已停止等待，请重试')
+    }
+    throw error
   } finally {
     if (timeoutId) clearTimeout(timeoutId)
   }

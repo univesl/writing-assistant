@@ -14,8 +14,19 @@ import {
   BlockTypeSelect,
   ListsToggle,
   Separator,
+  activeEditor$,
+  insertMarkdown$,
+  realmPlugin,
 } from '@mdxeditor/editor'
 import '@mdxeditor/editor/style.css'
+import {
+  $createParagraphNode,
+  $getRoot,
+  $getSelection,
+  $isRangeSelection,
+  $setSelection,
+  HISTORY_PUSH_TAG,
+} from 'lexical'
 import { useMemo } from 'react'
 
 const EDITOR_TRANSLATIONS = {
@@ -45,13 +56,86 @@ function translateEditor(key, defaultValue, interpolations = {}) {
   return text
 }
 
-function AiEditToolbarButton({ onClick }) {
+const aiSelectionBridgePlugin = realmPlugin({
+  init(realm, params) {
+    const bridgeRef = params?.bridgeRef
+    if (!bridgeRef) return
+
+    let capturedSelection = null
+
+    bridgeRef.current = {
+      capture() {
+        const editor = realm.getValue(activeEditor$)
+        let selectionSnapshot = null
+
+        editor?.getEditorState().read(() => {
+          const selection = $getSelection()
+          if ($isRangeSelection(selection) && !selection.isCollapsed()) {
+            selectionSnapshot = selection.clone()
+          }
+        })
+
+        capturedSelection = selectionSnapshot ? { editor, selectionSnapshot } : null
+        return Boolean(capturedSelection)
+      },
+
+      apply(replacementMarkdown) {
+        if (!capturedSelection) {
+          throw new Error('原选区已失效，请重新选择需要修改的内容')
+        }
+
+        const { editor, selectionSnapshot } = capturedSelection
+        if (!editor || realm.getValue(activeEditor$) !== editor) {
+          capturedSelection = null
+          throw new Error('编辑器焦点已变化，请重新选择需要修改的内容')
+        }
+
+        const replacement = replacementMarkdown ?? ''
+        editor.update(() => {
+          const restoredSelection = selectionSnapshot.clone()
+          $setSelection(restoredSelection)
+
+          if (!replacement) {
+            const activeSelection = $getSelection()
+            if (!$isRangeSelection(activeSelection) || activeSelection.isCollapsed()) {
+              throw new Error('无法恢复原选区，请重新选择需要修改的内容')
+            }
+            activeSelection.removeText()
+
+            // Lexical 会保留被清空块的类型（例如空标题会序列化为 "#"）。
+            // 当选区覆盖了全文时，统一收敛为一个空正文块，确保保存的是真正空文章。
+            const root = $getRoot()
+            if (!root.getTextContent()) {
+              root.clear()
+              root.append($createParagraphNode())
+            }
+          }
+        }, {
+          discrete: true,
+          ...(replacement ? {} : { tag: HISTORY_PUSH_TAG }),
+        })
+
+        if (replacement) {
+          realm.pub(insertMarkdown$, replacement)
+        }
+        capturedSelection = null
+      },
+
+      clear() {
+        capturedSelection = null
+      },
+    }
+  },
+})
+
+function AiEditToolbarButton({ onClick, disabled }) {
   return (
     <button
       type="button"
       title="AI 修改选中内容"
       aria-label="AI 修改选中内容"
       className="ai-edit-toolbar-button"
+      disabled={disabled}
       onMouseDown={(event) => {
         event.preventDefault()
       }}
@@ -67,7 +151,14 @@ function AiEditToolbarButton({ onClick }) {
   )
 }
 
-function MarkdownArticleEditor({ editorRef, markdown, onChange, onAiEditRequest }) {
+function MarkdownArticleEditor({
+  editorRef,
+  markdown,
+  onChange,
+  onAiEditRequest,
+  selectionBridgeRef,
+  interactionLocked = false,
+}) {
   const editorPlugins = useMemo(() => [
     headingsPlugin(),
     listsPlugin(),
@@ -84,7 +175,7 @@ function MarkdownArticleEditor({ editorRef, markdown, onChange, onAiEditRequest 
           <Separator />
           <BlockTypeSelect />
           <Separator />
-          <AiEditToolbarButton onClick={onAiEditRequest} />
+          <AiEditToolbarButton onClick={onAiEditRequest} disabled={interactionLocked} />
           <Separator />
           <BoldItalicUnderlineToggles />
           <Separator />
@@ -92,7 +183,8 @@ function MarkdownArticleEditor({ editorRef, markdown, onChange, onAiEditRequest 
         </>
       )
     }),
-  ], [onAiEditRequest])
+    aiSelectionBridgePlugin({ bridgeRef: selectionBridgeRef }),
+  ], [interactionLocked, onAiEditRequest, selectionBridgeRef])
 
   return (
     <MDXEditor

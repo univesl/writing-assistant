@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import './EditorSidebar.css'
 import { writeApi } from '../api/writeApi'
-import { streamQuickWrite } from '../services/writeStream'
+import { streamSelectionEdit } from '../services/writeStream'
 import AiEditDialog from './editor/AiEditDialog'
 import EditorToc from './editor/EditorToc'
 import MarkdownArticleEditor from './editor/MarkdownArticleEditor'
@@ -29,7 +29,7 @@ function EditorSidebar({
 
   const [showAIDialog, setShowAIDialog] = useState(false)
   const [aiDialogPosition, setAIDialogPosition] = useState({ x: 0, y: 0 })
-  const [selectedText, setSelectedText] = useState('')
+  const [selectedMarkdown, setSelectedMarkdown] = useState('')
   const [aiEditRequest, setAiEditRequest] = useState('')
   const [isAiEditing, setIsAiEditing] = useState(false)
   const [aiEditError, setAiEditError] = useState('')
@@ -39,9 +39,12 @@ function EditorSidebar({
   const contentRef = useRef(null)
   const aiDialogRef = useRef(null)
   const mdxEditorRef = useRef(null)
+  const selectionBridgeRef = useRef(null)
   const currentSessionIdRef = useRef(currentSession?.id || null)
   const editorResetTimerRef = useRef(null)
   const aiEditNoticeTimerRef = useRef(null)
+  const pendingEditorChangeRef = useRef(null)
+  const skipExternalSyncRef = useRef(null)
 
   const generateTableOfContents = useCallback((content) => {
     if (!content) return []
@@ -86,12 +89,26 @@ function EditorSidebar({
     }
   }, [])
 
-  const updateEditorMarkdown = useCallback((nextContent) => {
-    const normalizedContent = normalizeMarkdownStructure(nextContent)
-    setEditorContent(normalizedContent)
-    mdxEditorRef.current?.setMarkdown?.(normalizedContent)
-    resetEditorHistory()
-  }, [resetEditorHistory])
+  const waitForNextEditorChange = useCallback(() => {
+    return new Promise((resolve, reject) => {
+      if (pendingEditorChangeRef.current) {
+        window.clearTimeout(pendingEditorChangeRef.current.timeoutId)
+      }
+
+      const timeoutId = window.setTimeout(() => {
+        pendingEditorChangeRef.current = null
+        reject(new Error('编辑器未能应用选区修改，请重新选择后再试'))
+      }, 2000)
+
+      pendingEditorChangeRef.current = { resolve, reject, timeoutId }
+    })
+  }, [])
+
+  const discardPendingEditorChange = useCallback(() => {
+    if (!pendingEditorChangeRef.current) return
+    window.clearTimeout(pendingEditorChangeRef.current.timeoutId)
+    pendingEditorChangeRef.current = null
+  }, [])
 
   useEffect(() => {
     return () => {
@@ -101,8 +118,9 @@ function EditorSidebar({
       if (aiEditNoticeTimerRef.current) {
         window.clearTimeout(aiEditNoticeTimerRef.current)
       }
+      discardPendingEditorChange()
     }
-  }, [])
+  }, [discardPendingEditorChange])
 
   useEffect(() => {
     currentSessionIdRef.current = currentSession?.id || null
@@ -110,14 +128,27 @@ function EditorSidebar({
 
   useEffect(() => {
     const nextContent = normalizeMarkdownStructure(currentOutput || '')
+    const skippedSync = skipExternalSyncRef.current
+    if (
+      skippedSync &&
+      skippedSync.sessionId === currentSession?.id &&
+      skippedSync.content === nextContent
+    ) {
+      skipExternalSyncRef.current = null
+      return
+    }
+
+    skipExternalSyncRef.current = null
+    selectionBridgeRef.current?.clear?.()
+    discardPendingEditorChange()
     setEditorContent(nextContent)
     mdxEditorRef.current?.setMarkdown?.(nextContent)
     resetEditorHistory(400)
     setShowAIDialog(false)
-    setSelectedText('')
+    setSelectedMarkdown('')
     setAiEditRequest('')
     setAiEditError('')
-  }, [currentOutput, currentSession?.id, resetEditorHistory])
+  }, [currentOutput, currentSession?.id, discardPendingEditorChange, resetEditorHistory])
 
   useEffect(() => {
     setTableOfContents(generateTableOfContents(editorContent))
@@ -190,21 +221,14 @@ function EditorSidebar({
     }, 2200)
   }, [])
 
-  const readSelectedEditorText = useCallback(() => {
-    const editableElement = contentRef.current?.querySelector('.wysiwyg-markdown-content')
-    if (!editableElement) return ''
+  const readSelectedEditorMarkdown = useCallback(() => {
+    if (!selectionBridgeRef.current?.capture?.()) return ''
 
-    const selection = window.getSelection()
-    const text = selection?.toString().trim() || ''
-    if (text && selection?.rangeCount) {
-      const anchorNode = selection.anchorNode
-      const focusNode = selection.focusNode
-      if (editableElement.contains(anchorNode) && editableElement.contains(focusNode)) {
-        return text
-      }
-    }
+    const markdown = mdxEditorRef.current?.getSelectionMarkdown?.() || ''
+    if (markdown.trim()) return markdown
 
-    return mdxEditorRef.current?.getSelectionMarkdown?.()?.trim() || ''
+    selectionBridgeRef.current?.clear?.()
+    return ''
   }, [])
 
   const getDefaultAiDialogPosition = useCallback(() => {
@@ -226,36 +250,41 @@ function EditorSidebar({
   }, [])
 
   const openAiEditDialogFromToolbar = useCallback(() => {
-    const text = readSelectedEditorText()
-    if (!text) {
+    const markdown = readSelectedEditorMarkdown()
+    if (!markdown) {
       setShowAIDialog(false)
       setAiEditError('')
       showAiEditNotice('请先在正文中选择需要修改的内容')
       return
     }
 
-    setSelectedText(text)
+    setSelectedMarkdown(markdown)
     setAiEditRequest('')
     setAiEditError('')
     setAiEditNotice('')
     setAIDialogPosition(getDefaultAiDialogPosition())
     setShowAIDialog(true)
-  }, [getDefaultAiDialogPosition, readSelectedEditorText, showAiEditNotice])
+  }, [getDefaultAiDialogPosition, readSelectedEditorMarkdown, showAiEditNotice])
 
-  const handleCloseAIDialog = useCallback(() => {
+  const resetAiEditDialog = useCallback(() => {
     setShowAIDialog(false)
-    setSelectedText('')
+    setSelectedMarkdown('')
     setAiEditRequest('')
     setAiEditError('')
+    selectionBridgeRef.current?.clear?.()
     window.getSelection()?.removeAllRanges()
   }, [])
 
+  const handleCloseAIDialog = useCallback(() => {
+    if (isAiEditing) return
+    resetAiEditDialog()
+  }, [isAiEditing, resetAiEditDialog])
+
   const handleClickOutside = useCallback((e) => {
-    if (!showAIDialog) return
+    if (!showAIDialog || isAiEditing) return
     if (aiDialogRef.current?.contains(e.target)) return
-    if (contentRef.current?.contains(e.target)) return
     handleCloseAIDialog()
-  }, [handleCloseAIDialog, showAIDialog])
+  }, [handleCloseAIDialog, isAiEditing, showAIDialog])
 
   useEffect(() => {
     document.addEventListener('mousedown', handleClickOutside)
@@ -268,7 +297,7 @@ function EditorSidebar({
 
   const handleAiEdit = async () => {
     if (!currentSession) return
-    if (!selectedText.trim()) {
+    if (!selectedMarkdown.trim()) {
       setAiEditError('请先在正文中选择需要修改的内容')
       return
     }
@@ -277,7 +306,7 @@ function EditorSidebar({
     const editSessionId = currentSession.id
     const articleContent = getCurrentMarkdown()
     const instruction = aiEditRequest.trim()
-    const userMessage = `选中内容：\n「${selectedText}」\n\n修改意见：\n${instruction}`
+    const userMessage = `选中内容：\n「${selectedMarkdown}」\n\n修改意见：\n${instruction}`
     const nextChatHistory = [...(Array.isArray(chatHistory) ? chatHistory : []), {
       role: 'user',
       content: userMessage,
@@ -285,36 +314,62 @@ function EditorSidebar({
 
     setIsAiEditing(true)
     setAiEditError('')
+    let selectionApplied = false
 
     try {
       onChatHistoryUpdate?.(editSessionId, nextChatHistory)
       saveChatMessage(editSessionId, userMessage, 'user').catch(() => {})
 
-      const { articleContent: articleResult, summaryContent } = await streamQuickWrite({
+      const { replacementMarkdown, summaryContent } = await streamSelectionEdit({
         payload: {
           session_id: editSessionId,
-          mode: 'edit',
+          selected_markdown: selectedMarkdown,
+          instruction,
           style: 'general',
-          user_requirements: instruction,
-          reference_content: '',
-          reference_filename: '',
-          rag_content: '',
-          rag_references: [],
-          quotes: [selectedText],
-          article_content: articleContent,
-          extracted_fields: {},
-          model_type: 'general',
-          llm_model: 'qwen',
+          llm_model: 'xhang',
         },
         fallbackSummary: '已完成修改',
-        requireArticleMarker: true,
       })
 
-      await writeApi.saveArticle(editSessionId, articleResult)
+      if (editSessionId !== currentSessionIdRef.current) {
+        throw new Error('会话已切换，本次修改未应用；请在目标会话中重新选择内容')
+      }
+      if (getCurrentMarkdown() !== articleContent) {
+        throw new Error('等待期间文章内容已变化，本次修改未应用；请重新选择最新内容')
+      }
+
+      let updatedArticle = articleContent
+      if (replacementMarkdown !== selectedMarkdown.trim()) {
+        const editorChange = waitForNextEditorChange()
+        try {
+          const selectionBridge = selectionBridgeRef.current
+          if (!selectionBridge?.apply) {
+            throw new Error('编辑器选区不可用，请重新选择需要修改的内容')
+          }
+          selectionBridge.apply(replacementMarkdown)
+        } catch (error) {
+          discardPendingEditorChange()
+          throw error
+        }
+        updatedArticle = await editorChange
+        selectionApplied = true
+
+        skipExternalSyncRef.current = {
+          sessionId: editSessionId,
+          content: updatedArticle,
+        }
+        await onArticleUpdate?.(editSessionId, updatedArticle, { persist: false })
+
+        try {
+          await writeApi.saveArticle(editSessionId, updatedArticle)
+        } catch {
+          throw new Error('修改已应用，但自动保存失败，请点击“保存”按钮重试')
+        }
+      } else {
+        selectionBridgeRef.current?.clear?.()
+      }
 
       if (editSessionId === currentSessionIdRef.current) {
-        updateEditorMarkdown(articleResult)
-        onArticleUpdate?.(editSessionId, articleResult, { persist: false })
         const updatedChatHistory = [...nextChatHistory, {
           role: 'assistant',
           content: summaryContent,
@@ -322,12 +377,16 @@ function EditorSidebar({
         onChatHistoryUpdate?.(editSessionId, updatedChatHistory)
       }
 
-      await saveChatMessage(editSessionId, summaryContent, 'assistant')
-      handleCloseAIDialog()
-      window.getSelection()?.removeAllRanges()
+      saveChatMessage(editSessionId, summaryContent, 'assistant').catch(() => {})
+      resetAiEditDialog()
     } catch (error) {
       console.error('AI 局部修改失败:', error)
-      setAiEditError(error.message || 'AI 修改失败，请重试')
+      if (selectionApplied) {
+        resetAiEditDialog()
+        showAiEditNotice(error.message || '修改已应用，请手动保存')
+      } else {
+        setAiEditError(error.message || 'AI 修改失败，请重试')
+      }
     } finally {
       setIsAiEditing(false)
     }
@@ -338,6 +397,13 @@ function EditorSidebar({
 
     const normalizedMarkdown = normalizeMarkdownStructure(markdown || '')
     setEditorContent(normalizedMarkdown)
+
+    if (pendingEditorChangeRef.current) {
+      const pendingChange = pendingEditorChangeRef.current
+      window.clearTimeout(pendingChange.timeoutId)
+      pendingEditorChangeRef.current = null
+      pendingChange.resolve(normalizedMarkdown)
+    }
 
     if (normalizedMarkdown !== (markdown || '')) {
       window.setTimeout(() => {
@@ -394,6 +460,14 @@ function EditorSidebar({
         <div
           className="editor-content"
           ref={contentRef}
+          onMouseDownCapture={isAiEditing ? (event) => {
+            event.preventDefault()
+            event.stopPropagation()
+          } : undefined}
+          onKeyDownCapture={isAiEditing ? (event) => {
+            event.preventDefault()
+            event.stopPropagation()
+          } : undefined}
         >
           {aiEditNotice && (
             <div className="ai-edit-notice">{aiEditNotice}</div>
@@ -405,6 +479,8 @@ function EditorSidebar({
             markdown={editorContent}
             onChange={handleMarkdownChange}
             onAiEditRequest={openAiEditDialogFromToolbar}
+            selectionBridgeRef={selectionBridgeRef}
+            interactionLocked={isAiEditing}
           />
 
           {showGuardResult && guardResult && (

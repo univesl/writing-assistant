@@ -138,7 +138,7 @@ function MainContent({ currentSession, editorContent, chatHistory, onArticleUpda
                 onChange={(e) => setChatInput(e.target.value)}
                 disabled={isGenerating}
                 className="chat-textarea"
-                placeholder="输入修改润色要求..."
+                placeholder="输入全文改写要求（将重写整篇文章）..."
                 rows={3}
               />
             </div>
@@ -150,7 +150,7 @@ function MainContent({ currentSession, editorContent, chatHistory, onArticleUpda
               onClick={handleEditSubmit}
               disabled={isGenerating || !chatInput.trim()}
             >
-              {isGenerating ? '修改中...' : '发送'}
+              {isGenerating ? '全文改写中...' : '全文改写'}
             </button>
           </div>
         </div>

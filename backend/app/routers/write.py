@@ -7,10 +7,10 @@ from sqlalchemy.orm import Session as OrmSession
 
 from ..database import get_db
 from ..models import Session as SessionModel, Content as ContentModel
-from ..schemas import WriteQuickIn, WriteSaveIn
+from ..schemas import WriteQuickIn, WriteSaveIn, WriteSelectionEditIn
 from ..utils import ok
 from ..services.llm import stream_text_from_llm
-from ..services.prompt_builder import build_prompt
+from ..services.prompt_builder import build_prompt, build_selection_edit_prompt
 from ..services.kng_rag_service import get_kng_rag_service
 
 router = APIRouter(prefix="/write", tags=["write"])
@@ -124,6 +124,39 @@ async def write_quick(payload: WriteQuickIn, db: OrmSession = Depends(get_db)):
     return StreamingResponse(gen(), headers=headers, media_type="text/event-stream")
 
 
+@router.post("/edit-selection")
+async def write_edit_selection(payload: WriteSelectionEditIn):
+    """只把选中的 Markdown 片段交给模型，并流式返回替换片段。"""
+    messages = build_selection_edit_prompt(
+        selected_markdown=payload.selected_markdown,
+        instruction=payload.instruction,
+        style=payload.style,
+    )
+    llm_model = payload.llm_model or "xhang"
+    print(
+        f"[write-selection] session={payload.session_id}, model={llm_model}, "
+        f"selected_chars={len(payload.selected_markdown)}, "
+        f"instruction_chars={len(payload.instruction)}"
+    )
+
+    async def gen():
+        full_text = ""
+        async for chunk in stream_text_from_llm(messages, llm_model=llm_model):
+            full_text += chunk
+            yield sse_pack(chunk, False)
+
+        print(f"[write-selection] LLM 生成完成，总长度: {len(full_text)}")
+        yield sse_pack("", True)
+
+    headers = {
+        "Cache-Control": "no-cache",
+        "Content-Type": "text/event-stream",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+    }
+    return StreamingResponse(gen(), headers=headers, media_type="text/event-stream")
+
+
 @router.post("/save")
 def write_save(payload: WriteSaveIn, db: OrmSession = Depends(get_db)):
     session = db.get(SessionModel, payload.session_id)
@@ -148,4 +181,3 @@ def write_save(payload: WriteSaveIn, db: OrmSession = Depends(get_db)):
     db.refresh(c)
 
     return ok({"content_id": c.content_id}, "保存成功")
-

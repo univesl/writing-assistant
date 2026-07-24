@@ -27,6 +27,16 @@ class WriteQuickIn(BaseModel):
     use_rag: bool = False
 
 
+class WriteSelectionEditIn(BaseModel):
+    """AI 局部修改请求；只允许把选区和修改要求发送给模型。"""
+
+    session_id: int
+    selected_markdown: str = Field(..., min_length=1, max_length=30000)
+    instruction: str = Field(..., min_length=1, max_length=4000)
+    style: str = "general"
+    llm_model: Optional[Literal["xhang", "qwen"]] = "xhang"
+
+
 class WriteSaveIn(BaseModel):
     session_id: int
     content: str = Field(..., min_length=1)
@@ -38,7 +48,9 @@ class WriteSaveIn(BaseModel):
 
 class SaveArticleIn(BaseModel):
     session_id: int
-    article_content: str = Field(..., min_length=1)
+    # 允许保存空文章：当用户选中全文并执行“删除选区”时，
+    # 空字符串是合法的最终编辑结果，不能让刷新后恢复旧内容。
+    article_content: str = Field(..., min_length=0)
     article_title: Optional[str] = Field(default=None, max_length=255)
     original_content: Optional[str] = None
 
