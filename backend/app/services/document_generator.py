@@ -3,6 +3,7 @@
 使用 KnG RAG API 进行知识库检索，结合大模型生成文档
 """
 
+import asyncio
 import os
 import json
 import time
@@ -58,25 +59,22 @@ async def generate_document_async(
     if use_knowledge_base:
         try:
             service = get_kng_rag_service()
-            
-            if service.is_ready():
-                print(f"[文档生成] Step 1: 正在进行 RAG 检索...")
-                retrieval_result = service.retrieve_for_document_generation(
-                    topic=topic,
-                    requirements=requirements,
-                    mode=retrieval_mode,
-                )
-                
-                knowledge_base_content = retrieval_result.get("content", "")
-                # 获取KNG返回的时间信息
-                kng_timing = retrieval_result.get("timing", {})
-                print(f"[文档生成] Step 1: RAG 检索完成 (KNG耗时: {kng_timing.get('total_seconds', 'N/A')}s)")
-                
-                # 提取参考信息（从返回内容中解析）
-                if "参考" in knowledge_base_content or "来源" in knowledge_base_content:
-                    references.append("知识库检索结果")
-            else:
-                print(f"[文档生成] KnG 服务未就绪，跳过知识库检索")
+            print(f"[文档生成] Step 1: 正在进行 RAG 检索...")
+            retrieval_result = await asyncio.to_thread(
+                service.retrieve_for_document_generation,
+                topic=topic,
+                requirements=requirements,
+                mode=retrieval_mode,
+            )
+
+            knowledge_base_content = retrieval_result.get("content", "")
+            references = retrieval_result.get("references", [])
+            kng_timing = retrieval_result.get("timing", {})
+            print(
+                "[文档生成] Step 1: RAG 检索完成 "
+                f"(KNG耗时: {kng_timing.get('total_seconds', 'N/A')}s, "
+                f"来源数量: {len(references)})"
+            )
                 
         except Exception as e:
             print(f"[文档生成] 知识库检索失败: {e}")
@@ -178,18 +176,12 @@ async def retrieve_knowledge_base_content(
     """
     try:
         service = get_kng_rag_service()
-        
-        if not service.is_ready():
-            return {
-                "content": "",
-                "error": "KnG 服务未就绪",
-            }
-        
-        result = service.retrieve_for_document_generation(
+
+        result = await asyncio.to_thread(
+            service.retrieve_for_document_generation,
             topic=topic,
             mode=mode,
         )
-        
         return result
         
     except Exception as e:
@@ -292,10 +284,12 @@ async def generate_reply_document(
     """生成回函"""
     
     kb_content = ""
+    kb_references = []
     if use_knowledge_base:
         try:
             kb_result = await retrieve_knowledge_base_content(topic or requirements)
             kb_content = kb_result.get("content", "")
+            kb_references = kb_result.get("references", [])
         except Exception as e:
             print(f"[WARN] 知识库检索失败: {e}")
     
@@ -307,6 +301,7 @@ async def generate_reply_document(
             "user_requirements": requirements,
             "reference_content": original_content,
             "rag_content": kb_content,
+            "rag_references": kb_references,
             "extracted_fields": extracted_fields,
             "style": "general",
         },
@@ -329,10 +324,12 @@ async def generate_reference_document(
     """参考写作：根据上传文件生成公文（流式）"""
     
     kb_content = ""
+    kb_references = []
     if use_knowledge_base:
         try:
             kb_result = await retrieve_knowledge_base_content(topic or requirements or reference_filename)
             kb_content = kb_result.get("content", "")
+            kb_references = kb_result.get("references", [])
         except Exception as e:
             print(f"[WARN] 知识库检索失败: {e}")
     
@@ -353,6 +350,7 @@ async def generate_reference_document(
             "reference_content": reference_content,
             "reference_filename": reference_filename,
             "rag_content": kb_content,
+            "rag_references": kb_references,
             "style": "general",
         },
     )

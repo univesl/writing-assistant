@@ -7,7 +7,11 @@ import EditorSidebar from './components/EditorSidebar'
 import StartPage from './components/StartPage'
 import { sessionApi } from './api/sessionApi'
 import { writeApi } from './api/writeApi'
-import { extractArticlePreview, parseGeneratedOutput } from './utils/generatedOutput'
+import {
+  appendKnowledgeSources,
+  extractArticlePreview,
+  parseGeneratedOutput,
+} from './utils/generatedOutput'
 import { formatSessionTime } from './utils/sessionTime'
 import { streamQuickWrite } from './services/writeStream'
 
@@ -439,7 +443,7 @@ function App() {
         setCurrentPage('content')
 
         // RAG 统一由后端在 /api/write/quick 中自动做，前端不预调用
-        const { articleContent, summaryContent } = await streamQuickWrite({
+        const { articleContent, summaryContent, rag } = await streamQuickWrite({
           payload: {
             session_id: generationSessionId,
             mode: 'quick',
@@ -470,12 +474,13 @@ function App() {
         })
 
         await writeApi.saveArticle(generationSessionId, articleContent)
+        const assistantSummary = appendKnowledgeSources(summaryContent, rag?.references)
 
         const updatedChatHistory = [...newChatHistory, {
           role: 'assistant',
-          content: summaryContent
+          content: assistantSummary
         }]
-        await writeApi.saveContent(generationSessionId, summaryContent, 'quick', 'chat', 'assistant')
+        await writeApi.saveContent(generationSessionId, assistantSummary, 'quick', 'chat', 'assistant')
 
         if (generationSessionId === currentSessionIdRef.current) {
           setCurrentChatHistory(updatedChatHistory)

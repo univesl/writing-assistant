@@ -100,30 +100,36 @@ class WriteRAGFallbackTest(unittest.TestCase):
         payload = self.make_payload(use_rag=False)
 
         with patch("app.routers.write.get_kng_rag_service") as get_service:
-            content, references = _retrieve_rag_content(payload)
+            content, references, info = asyncio.run(_retrieve_rag_content(payload))
 
         self.assertEqual(content, "")
         self.assertEqual(references, [])
+        self.assertFalse(info["requested"])
+        self.assertFalse(info["used"])
         get_service.assert_not_called()
 
     def test_supplied_rag_content_skips_kng(self):
         payload = self.make_payload(use_rag=True, rag_content="外部检索内容", rag_references=[{"id": 1}])
 
         with patch("app.routers.write.get_kng_rag_service") as get_service:
-            content, references = _retrieve_rag_content(payload)
+            content, references, info = asyncio.run(_retrieve_rag_content(payload))
 
         self.assertEqual(content, "外部检索内容")
         self.assertEqual(references, [{"id": 1}])
+        self.assertTrue(info["requested"])
+        self.assertTrue(info["used"])
         get_service.assert_not_called()
 
     def test_kng_failure_falls_back_without_content(self):
         payload = self.make_payload(use_rag=True)
 
         with patch("app.routers.write.get_kng_rag_service", side_effect=RuntimeError("not available")):
-            content, references = _retrieve_rag_content(payload)
+            content, references, info = asyncio.run(_retrieve_rag_content(payload))
 
         self.assertEqual(content, "")
         self.assertEqual(references, [])
+        self.assertTrue(info["requested"])
+        self.assertFalse(info["used"])
 
 
 class GenerateRetrieveContractTest(unittest.TestCase):

@@ -31,14 +31,16 @@ export async function streamQuickWrite({
     const decoder = new TextDecoder('utf-8')
     let buffer = ''
     let output = ''
+    let metadata = {}
 
     while (true) {
       const { done, value } = await reader.read()
       if (done) break
 
-      const parsed = appendSseChunk(buffer, output, value, decoder)
+      const parsed = appendSseChunk(buffer, output, value, decoder, metadata)
       buffer = parsed.buffer
       output = parsed.output
+      metadata = parsed.metadata
 
       if (onArticle) {
         const liveArticle = extractArticlePreview(output)
@@ -56,6 +58,8 @@ export async function streamQuickWrite({
 
     return {
       output,
+      metadata,
+      rag: metadata.rag,
       ...parseGeneratedOutput(output, fallbackSummary),
     }
   } finally {

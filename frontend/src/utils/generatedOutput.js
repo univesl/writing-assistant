@@ -32,9 +32,26 @@ export function parseGeneratedOutput(output, fallbackSummary = '已生成文章'
   }
 }
 
-export function appendSseChunk(buffer, output, value, decoder = new TextDecoder('utf-8')) {
+export function appendKnowledgeSources(summary, references = []) {
+  const uniqueReferences = [...new Set(
+    references.filter(Boolean).map(reference => String(reference).trim()).filter(Boolean)
+  )]
+  if (uniqueReferences.length === 0) return summary
+
+  const sourceLines = uniqueReferences.map(reference => `- ${reference}`).join('\n')
+  return `${summary.trim()}\n\n知识库来源：\n${sourceLines}`
+}
+
+export function appendSseChunk(
+  buffer,
+  output,
+  value,
+  decoder = new TextDecoder('utf-8'),
+  metadata = {},
+) {
   let nextBuffer = buffer + decoder.decode(value, { stream: true })
   let nextOutput = output
+  let nextMetadata = metadata
 
   const events = nextBuffer.split('\n\n')
   nextBuffer = events.pop() || ''
@@ -50,10 +67,13 @@ export function appendSseChunk(buffer, output, value, decoder = new TextDecoder(
       if (data.content) {
         nextOutput += data.content
       }
+      if (data.rag) {
+        nextMetadata = { ...nextMetadata, rag: data.rag }
+      }
     } catch (error) {
       console.error('Parse error:', error)
     }
   }
 
-  return { buffer: nextBuffer, output: nextOutput }
+  return { buffer: nextBuffer, output: nextOutput, metadata: nextMetadata }
 }

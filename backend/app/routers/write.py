@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 from fastapi import APIRouter, Depends
@@ -15,8 +16,10 @@ from ..services.kng_rag_service import get_kng_rag_service
 router = APIRouter(prefix="/write", tags=["write"])
 
 
-def sse_pack(content: str, finish: bool) -> str:
-    return f"data: {json.dumps({'content': content, 'finish': finish}, ensure_ascii=False)}\n\n"
+def sse_pack(content: str, finish: bool, **metadata) -> str:
+    payload = {"content": content, "finish": finish}
+    payload.update(metadata)
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
 def _default_rag_topic(payload: WriteQuickIn) -> str:
@@ -28,28 +31,46 @@ def _default_rag_topic(payload: WriteQuickIn) -> str:
     )
 
 
-def _retrieve_rag_content(payload: WriteQuickIn) -> tuple[str, list]:
+async def _retrieve_rag_content(payload: WriteQuickIn) -> tuple[str, list, dict]:
     """Keep KnG optional: failure or unavailable service must not block writing."""
     rag_content = payload.rag_content
     rag_references = payload.rag_references
+    rag_info = {
+        "requested": bool(payload.use_rag),
+        "used": bool(rag_content),
+        "references": rag_references,
+    }
+
     if payload.use_rag and not rag_content:
         try:
             service = get_kng_rag_service()
-            if service.is_ready():
-                topic = payload.user_requirements or _default_rag_topic(payload)
-                result = service.retrieve_for_document_generation(
-                    topic=topic,
-                    requirements=payload.user_requirements or "",
-                    mode="local",
+            topic = payload.user_requirements or _default_rag_topic(payload)
+            result = await asyncio.to_thread(
+                service.retrieve_for_document_generation,
+                topic=topic,
+                requirements=payload.user_requirements or "",
+                mode="local",
+            )
+            if result.get("content"):
+                rag_content = result["content"]
+                rag_references = result.get("references", [])
+                rag_info.update(
+                    {
+                        "used": True,
+                        "references": rag_references,
+                        "elapsed_seconds": result.get("timing", {}).get("total_seconds"),
+                    }
                 )
-                if result.get("content"):
-                    rag_content = result["content"]
-                    rag_references = result.get("references", [])
-                    print(f"[write] RAG 检索完成，内容长度: {len(rag_content)}")
+                print(
+                    f"[write] RAG 检索完成，内容长度: {len(rag_content)}, "
+                    f"来源数量: {len(rag_references)}"
+                )
+            elif result.get("error"):
+                print(f"[write] RAG 检索失败（跳过）: {result['error']}")
         except Exception as e:
             print(f"[write] RAG 检索失败（跳过）: {e}")
 
-    return rag_content, rag_references
+    return rag_content, rag_references, rag_info
 
 
 @router.post("/quick")
@@ -63,7 +84,7 @@ async def write_quick(payload: WriteQuickIn, db: OrmSession = Depends(get_db)):
         payload.session_id = session.session_id
 
     # 仅当用户勾选了"启用知识库检索"且未提供 rag_content 时，才做 RAG 检索
-    rag_content, rag_references = _retrieve_rag_content(payload)
+    rag_content, rag_references, rag_info = await _retrieve_rag_content(payload)
 
     messages = build_prompt(
         mode=payload.mode,
@@ -92,7 +113,7 @@ async def write_quick(payload: WriteQuickIn, db: OrmSession = Depends(get_db)):
             yield sse_pack(chunk, False)
 
         print(f"[write] LLM 生成完成，总长度: {len(full_text)}")
-        yield sse_pack("", True)
+        yield sse_pack("", True, rag=rag_info)
 
     headers = {
         "Cache-Control": "no-cache",

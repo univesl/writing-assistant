@@ -4,16 +4,63 @@ KnG RAG 检索服务
 """
 
 import os
-import json
+import re
 import requests
 import time
 from typing import List, Dict, Any, Optional
-from pathlib import Path
 
 # KnG 服务配置
 KNG_BASE_URL = os.getenv("KNG_BASE_URL", "http://127.0.0.1:50001")
 KNG_STATUS_TIMEOUT = float(os.getenv("KNG_STATUS_TIMEOUT", "5"))
 KNG_QUERY_TIMEOUT = float(os.getenv("KNG_QUERY_TIMEOUT", "120"))
+
+_REFERENCE_HEADING_RE = re.compile(
+    r"(?im)^[ \t]*(?:#{1,6}[ \t]*)?(?:references|参考(?:文献|来源))[ \t]*:?[ \t]*$"
+)
+_REFERENCE_ITEM_RE = re.compile(r"^[ \t]*[-*][ \t]*\[(\d+)\][ \t]*(.+?)[ \t]*$")
+_REFERENCE_BULLET_RE = re.compile(r"^[ \t]*[-*][ \t]+(.+?)[ \t]*$")
+_SOURCE_SECTION_RE = re.compile(
+    r"(?im)^[ \t]*#{1,6}[ \t]*(?:相关)?文件(?:名称)?(?:和|及)?来源[ \t]*:?[ \t]*$"
+)
+_NEXT_HEADING_RE = re.compile(r"(?m)^[ \t]*#{1,6}[ \t]+.+$")
+
+
+def _parse_reference_block(reference_block: str) -> List[str]:
+    references = []
+    seen = set()
+    for line in reference_block.splitlines():
+        match = _REFERENCE_ITEM_RE.match(line)
+        if match:
+            reference = f"[{match.group(1)}] {match.group(2).strip()}"
+        else:
+            bullet = _REFERENCE_BULLET_RE.match(line)
+            if not bullet:
+                continue
+            reference = bullet.group(1).strip().replace("**", "")
+
+        if reference and reference not in seen:
+            references.append(reference)
+            seen.add(reference)
+    return references
+
+
+def split_rag_response(raw_content: str) -> tuple[str, List[str]]:
+    """Split KnG's native answer from its References section."""
+    content = (raw_content or "").strip()
+    heading = _REFERENCE_HEADING_RE.search(content)
+    if heading:
+        answer = content[:heading.start()].rstrip()
+        return answer, _parse_reference_block(content[heading.end():])
+
+    source_heading = _SOURCE_SECTION_RE.search(content)
+    if not source_heading:
+        return content, []
+
+    source_block = content[source_heading.end():]
+    next_heading = _NEXT_HEADING_RE.search(source_block)
+    if next_heading:
+        source_block = source_block[:next_heading.start()]
+    return content, _parse_reference_block(source_block)
 
 
 class KnGRAGService:
@@ -126,33 +173,36 @@ class KnGRAGService:
         print(f"[KnG RAG] 主题: {topic}")
         print(f"[KnG RAG] 检索模式: {mode}")
         
-        # 构建查询语句
-        query = f"请根据以下主题提供相关的北航真实公文参考内容：\n\n主题：{topic}"
+        query = (
+            "请从北航公文知识库中检索与以下写作任务直接相关的资料。\n\n"
+            f"写作任务：{topic}"
+        )
         if requirements:
-            query += f"\n要求：{requirements}"
-        query += "\n\n请提供相关的完整公文原文作为参考，包括标题格式、正文结构、落款方式等。"
-        
-        system_prompt = """你是北航公文知识库助手。请基于知识库检索结果，提供真实公文原文作为参考：
-1. 返回与主题最相关的公文原文内容（尽量完整）
-2. 标注公文的文体类型（通知/规章制度/讲话稿/报告/函等）
-3. 提取关键的格式特征和用语习惯
-
-尽量提供完整的公文原文，可以适当举例说明格式要点。"""
+            query += f"\n用户要求：{requirements}"
+        query += (
+            "\n\n请重点返回："
+            "\n1. 与任务直接相关的制度依据、事实信息和既有做法；"
+            "\n2. 可以用于写作的准确表述和必要原文片段；"
+            "\n3. 相关文件名称和来源。"
+            "\n只完成资料检索和归纳，不要代写最终公文；"
+            "知识库中没有的信息请明确说明，不要编造。"
+        )
         
         try:
-            content = self.query(
+            raw_content = self.query(
                 query=query,
                 mode=mode,
-                system_prompt=system_prompt,
                 knowledge_source="kg",
                 stream=False,
             )
+            content, references = split_rag_response(raw_content)
             
             total_time = time.time() - total_start
             print(f"[KnG RAG] ===== 检索完成，总耗时: {total_time:.2f}s =====\n")
             
             return {
                 "content": content,
+                "references": references,
                 "query": query,
                 "timing": {
                     "total_seconds": round(total_time, 2)
@@ -164,6 +214,7 @@ class KnGRAGService:
             print(f"[KnG RAG] Retrieval failed after {total_time:.2f}s: {e}\n")
             return {
                 "content": "",
+                "references": [],
                 "query": query,
                 "error": str(e),
                 "timing": {
