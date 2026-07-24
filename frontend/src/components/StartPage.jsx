@@ -30,12 +30,12 @@ function StartPage({ currentSession, onGenerate, isGenerating }) {
   }, [])
 
   const handleFileChange = async (e) => {
-    const file = e.target.files[0]
-    if (!file) return
+    const files = Array.from(e.target.files || [])
+    if (files.length === 0) return
 
     setReferenceDocuments(prev => [
       ...prev,
-      { filename: file.name, type: 'upload', file }
+      ...files.map(file => ({ filename: file.name, type: 'upload', file }))
     ])
 
     e.target.value = ''
@@ -224,6 +224,7 @@ function StartPage({ currentSession, onGenerate, isGenerating }) {
                 ref={fileInputRef}
                 onChange={handleFileChange}
                 accept=".docx,.md,.txt,.pdf"
+                multiple
                 style={{ display: 'none' }}
                 disabled={isGenerating}
               />

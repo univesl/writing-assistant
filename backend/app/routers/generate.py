@@ -5,7 +5,7 @@
 
 import os
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session as OrmSession
 from pydantic import BaseModel
@@ -21,6 +21,12 @@ from ..services.document_generator import (
     generate_reference_document,
     list_available_models,
     retrieve_knowledge_base_content,
+)
+from ..services.reference_material_service import (
+    ReferenceMaterialError,
+    format_reference_materials,
+    parse_reference_uploads,
+    summarize_reference_filenames,
 )
 
 router = APIRouter(prefix="/generate", tags=["generate"])
@@ -98,6 +104,45 @@ async def reference_write(request: ReferenceWriteRequest):
             top_k=request.top_k,
         ),
         media_type="text/event-stream"
+    )
+
+
+@router.post("/reference-write-files")
+async def reference_write_files(
+    files: List[UploadFile] = File(...),
+    session_id: int = Form(...),
+    generate_type: str = Form("general"),
+    topic: str = Form(""),
+    requirements: str = Form(""),
+    model_name: str = Form(DEFAULT_GENERATION_MODEL),
+    use_knowledge_base: bool = Form(False),
+    top_k: int = Form(3),
+):
+    """参考写作（多文件）：文件仅在当前请求的临时目录中存在。"""
+    try:
+        materials = await parse_reference_uploads(files)
+    except ReferenceMaterialError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    reference_content = format_reference_materials(materials)
+    reference_filename = summarize_reference_filenames(materials)
+    print(
+        f"[reference-write] session={session_id}, files={len(materials)}, "
+        f"parsed_chars={len(reference_content)}"
+    )
+
+    return StreamingResponse(
+        generate_reference_document(
+            reference_content=reference_content,
+            reference_filename=reference_filename,
+            generate_type=generate_type,
+            topic=topic,
+            requirements=requirements,
+            model_name=model_name,
+            use_knowledge_base=use_knowledge_base,
+            top_k=top_k,
+        ),
+        media_type="text/event-stream",
     )
 
 

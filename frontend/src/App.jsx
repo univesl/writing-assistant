@@ -410,14 +410,15 @@ function App() {
           userDisplayContent = quickRequirements ? `写文章：${quickRequirements}` : '写文章'
         }
       } else if (writingMode === 'reference') {
-        const uploadDoc = referenceDocuments.find(d => d.type === 'upload')
-        if (uploadDoc) {
+        const uploadDocs = referenceDocuments.filter(d => d.type === 'upload')
+        if (uploadDocs.length > 0) {
           const typeLabels = {
             reply: '根据上传文件生成回函',
             imitate: '仿照上传文件风格写新公文',
             general: '基于上传文件内容生成公文'
           }
           userDisplayContent = `${typeLabels[referenceWriteType] || '参考写作'}`
+          userDisplayContent += `（共 ${uploadDocs.length} 份参考材料）`
           if (referenceRequirements.trim()) {
             userDisplayContent += `（要求：${referenceRequirements.trim()}）`
           }
@@ -485,43 +486,34 @@ function App() {
 
 
       } else if (writingMode === 'reference') {
-        // 参考写作：调用 /api/generate/reference-write
-        const uploadDoc = referenceDocuments.find(d => d.type === 'upload')
-        if (!uploadDoc) return
+        const uploadDocs = referenceDocuments.filter(d => d.type === 'upload')
+        if (uploadDocs.length === 0) return
 
-        // 需要先上传文件获取内容
-        const fileData = await uploadFileToSession(uploadDoc.file, generationSessionId)
+        setGenerationMessage(`正在解析 ${uploadDocs.length} 份参考材料…`)
+        const formData = new FormData()
+        uploadDocs.forEach(doc => formData.append('files', doc.file, doc.filename))
+        formData.append('session_id', String(generationSessionId))
+        formData.append('generate_type', referenceWriteType)
+        formData.append('topic', referenceRequirements.trim() || uploadDocs.map(doc => doc.filename).join('、'))
+        formData.append('requirements', referenceRequirements.trim())
+        formData.append('use_knowledge_base', String(useRag || false))
+        formData.append('top_k', '3')
 
-        // 如果后端没有解析出内容，尝试本地读取
-        let refContent = fileData?.parsed_content || ''
-        if (!refContent && uploadDoc.file) {
-          // PDF 文件不适合 readAsText，只对 md/txt 做本地 fallback
-          const ext = uploadDoc.file.name?.split('.').pop()?.toLowerCase()
-          if (ext === 'md' || ext === 'txt') {
-            refContent = await readFileAsText(uploadDoc.file)
-          }
-        }
-
-        const response = await fetch('/api/generate/reference-write', {
+        const response = await fetch('/api/generate/reference-write-files', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            session_id: generationSessionId,
-            reference_content: refContent,
-            reference_filename: uploadDoc.filename || '',
-            generate_type: referenceWriteType,
-            topic: referenceRequirements.trim() || uploadDoc.filename || '',
-            requirements: referenceRequirements.trim() || '',
-            use_knowledge_base: false,
-            top_k: 3
-          })
+          body: formData
         })
 
+        if (!response.ok) {
+          const errorPayload = await response.json().catch(() => null)
+          throw new Error(errorPayload?.detail || errorPayload?.msg || `请求失败: ${response.status}`)
+        }
         if (!response.body || !response.body.getReader) {
           const text = await response.text()
           throw new Error(text || '响应格式错误')
         }
 
+        setGenerationMessage('参考材料解析完成，正在生成正文…')
         const reader = response.body.getReader()
         const decoder = new TextDecoder()
         let fullContent = ''
@@ -572,41 +564,6 @@ function App() {
       setIsGenerating(false)
       setGenerationMessage('')
     }
-  }
-
-  // 上传文件辅助函数
-  const uploadFileToSession = async (file, sessionId = currentSessionIdRef.current) => {
-    if (!file || !sessionId) return null
-    try {
-      const formData = new FormData()
-      formData.append('file', file)
-      formData.append('auto_parse', 'true')
-      formData.append('auto_extract', 'false')
-
-      const response = await fetch(`/api/upload/session/${sessionId}`, {
-        method: 'POST',
-        body: formData
-      })
-      const result = await response.json()
-      if (result.code === 200 && result.data) {
-        return result.data
-      }
-      return null
-    } catch (error) {
-      console.error('文件上传失败:', error)
-      return null
-    }
-  }
-
-  // 读取本地文件内容作为 fallback
-  const readFileAsText = (file) => {
-    return new Promise((resolve) => {
-      if (!file) return resolve('')
-      const reader = new FileReader()
-      reader.onload = (e) => resolve(e.target.result)
-      reader.onerror = () => resolve('')
-      reader.readAsText(file)
-    })
   }
 
   return (
