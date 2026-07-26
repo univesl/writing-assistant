@@ -28,6 +28,7 @@ import {
   HISTORY_PUSH_TAG,
 } from 'lexical'
 import { useMemo } from 'react'
+import { captureSelectionContext } from '../../utils/selectionContext'
 
 const EDITOR_TRANSLATIONS = {
   'toolbar.undo': '撤销 {{shortcut}}',
@@ -67,16 +68,20 @@ const aiSelectionBridgePlugin = realmPlugin({
       capture() {
         const editor = realm.getValue(activeEditor$)
         let selectionSnapshot = null
+        let readOnlyContext = null
 
         editor?.getEditorState().read(() => {
           const selection = $getSelection()
           if ($isRangeSelection(selection) && !selection.isCollapsed()) {
             selectionSnapshot = selection.clone()
+            readOnlyContext = captureSelectionContext(selection, $getRoot())
           }
         })
 
-        capturedSelection = selectionSnapshot ? { editor, selectionSnapshot } : null
-        return Boolean(capturedSelection)
+        capturedSelection = selectionSnapshot && readOnlyContext
+          ? { editor, selectionSnapshot }
+          : null
+        return capturedSelection ? readOnlyContext : null
       },
 
       apply(replacementMarkdown) {

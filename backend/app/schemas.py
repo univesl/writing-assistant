@@ -28,10 +28,14 @@ class WriteQuickIn(BaseModel):
 
 
 class WriteSelectionEditIn(BaseModel):
-    """AI 局部修改请求；只允许把选区和修改要求发送给模型。"""
+    """AI 局部修改请求；上下文只读，模型唯一可改范围仍是选区。"""
 
     session_id: int
     selected_markdown: str = Field(..., min_length=1, max_length=30000)
+    document_title: str = Field(default="", max_length=300)
+    section_heading: str = Field(default="", max_length=800)
+    context_before: str = Field(default="", max_length=3000)
+    context_after: str = Field(default="", max_length=3000)
     instruction: str = Field(..., min_length=1, max_length=4000)
     style: str = "general"
     llm_model: Optional[Literal["xhang", "qwen"]] = "xhang"

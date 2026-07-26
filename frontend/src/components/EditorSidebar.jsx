@@ -11,6 +11,12 @@ import { cleanHeadingText, normalizeMarkdownStructure } from '../utils/markdownE
 const AI_DIALOG_WIDTH = 380
 const AI_DIALOG_FALLBACK_HEIGHT = 220
 const AI_DIALOG_MARGIN = 16
+const EMPTY_SELECTION_CONTEXT = Object.freeze({
+  document_title: '',
+  section_heading: '',
+  context_before: '',
+  context_after: '',
+})
 
 function EditorSidebar({
   currentSession,
@@ -30,6 +36,7 @@ function EditorSidebar({
   const [showAIDialog, setShowAIDialog] = useState(false)
   const [aiDialogPosition, setAIDialogPosition] = useState({ x: 0, y: 0 })
   const [selectedMarkdown, setSelectedMarkdown] = useState('')
+  const [selectionContext, setSelectionContext] = useState(EMPTY_SELECTION_CONTEXT)
   const [aiEditRequest, setAiEditRequest] = useState('')
   const [isAiEditing, setIsAiEditing] = useState(false)
   const [aiEditError, setAiEditError] = useState('')
@@ -146,6 +153,7 @@ function EditorSidebar({
     resetEditorHistory(400)
     setShowAIDialog(false)
     setSelectedMarkdown('')
+    setSelectionContext(EMPTY_SELECTION_CONTEXT)
     setAiEditRequest('')
     setAiEditError('')
   }, [currentOutput, currentSession?.id, discardPendingEditorChange, resetEditorHistory])
@@ -221,14 +229,15 @@ function EditorSidebar({
     }, 2200)
   }, [])
 
-  const readSelectedEditorMarkdown = useCallback(() => {
-    if (!selectionBridgeRef.current?.capture?.()) return ''
+  const readSelectedEditorSelection = useCallback(() => {
+    const context = selectionBridgeRef.current?.capture?.()
+    if (!context) return null
 
     const markdown = mdxEditorRef.current?.getSelectionMarkdown?.() || ''
-    if (markdown.trim()) return markdown
+    if (markdown.trim()) return { markdown, context }
 
     selectionBridgeRef.current?.clear?.()
-    return ''
+    return null
   }, [])
 
   const getDefaultAiDialogPosition = useCallback(() => {
@@ -250,25 +259,27 @@ function EditorSidebar({
   }, [])
 
   const openAiEditDialogFromToolbar = useCallback(() => {
-    const markdown = readSelectedEditorMarkdown()
-    if (!markdown) {
+    const selected = readSelectedEditorSelection()
+    if (!selected) {
       setShowAIDialog(false)
       setAiEditError('')
       showAiEditNotice('请先在正文中选择需要修改的内容')
       return
     }
 
-    setSelectedMarkdown(markdown)
+    setSelectedMarkdown(selected.markdown)
+    setSelectionContext(selected.context)
     setAiEditRequest('')
     setAiEditError('')
     setAiEditNotice('')
     setAIDialogPosition(getDefaultAiDialogPosition())
     setShowAIDialog(true)
-  }, [getDefaultAiDialogPosition, readSelectedEditorMarkdown, showAiEditNotice])
+  }, [getDefaultAiDialogPosition, readSelectedEditorSelection, showAiEditNotice])
 
   const resetAiEditDialog = useCallback(() => {
     setShowAIDialog(false)
     setSelectedMarkdown('')
+    setSelectionContext(EMPTY_SELECTION_CONTEXT)
     setAiEditRequest('')
     setAiEditError('')
     selectionBridgeRef.current?.clear?.()
@@ -324,6 +335,7 @@ function EditorSidebar({
         payload: {
           session_id: editSessionId,
           selected_markdown: selectedMarkdown,
+          ...selectionContext,
           instruction,
           style: 'general',
           llm_model: 'xhang',

@@ -126,16 +126,21 @@ async def write_quick(payload: WriteQuickIn, db: OrmSession = Depends(get_db)):
 
 @router.post("/edit-selection")
 async def write_edit_selection(payload: WriteSelectionEditIn):
-    """只把选中的 Markdown 片段交给模型，并流式返回替换片段。"""
+    """让模型读取有限上下文，但只流式返回选区的替换片段。"""
     messages = build_selection_edit_prompt(
         selected_markdown=payload.selected_markdown,
         instruction=payload.instruction,
         style=payload.style,
+        document_title=payload.document_title,
+        section_heading=payload.section_heading,
+        context_before=payload.context_before,
+        context_after=payload.context_after,
     )
     llm_model = payload.llm_model or "xhang"
     print(
         f"[write-selection] session={payload.session_id}, model={llm_model}, "
         f"selected_chars={len(payload.selected_markdown)}, "
+        f"context_chars={len(payload.context_before)}/{len(payload.context_after)}, "
         f"instruction_chars={len(payload.instruction)}"
     )
 

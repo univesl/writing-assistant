@@ -20,23 +20,31 @@ async def _collect_stream(response):
 
 
 class SelectionEditPromptTest(unittest.TestCase):
-    def test_prompt_contains_only_selection_and_instruction(self):
+    def test_prompt_uses_read_only_context_but_keeps_selection_as_only_editable_range(self):
         messages = build_selection_edit_prompt(
             selected_markdown="需要修改的句子。",
             instruction="改得更正式",
             style="notice",
+            document_title="关于开展专项工作的通知",
+            section_heading="二、工作要求",
+            context_before="各单位应高度重视。",
+            context_after="联系人及联系方式另行通知。",
         )
         prompt = "\n".join(message["content"] for message in messages)
 
         self.assertIn("需要修改的句子。", prompt)
         self.assertIn("改得更正式", prompt)
+        self.assertIn("关于开展专项工作的通知", prompt)
+        self.assertIn("二、工作要求", prompt)
+        self.assertIn("各单位应高度重视。", prompt)
+        self.assertIn("联系人及联系方式另行通知。", prompt)
         self.assertIn("---REPLACEMENT---", prompt)
         self.assertIn("---SUMMARY---", prompt)
         self.assertIn("[[DELETE_SELECTION]]", prompt)
         self.assertIn("不得用 ***、---", prompt)
         self.assertIn("禁止续写、补写或复述选区之外的文章", prompt)
-        self.assertNotIn("前置段落保持不变", prompt)
-        self.assertNotIn("后置段落保持不变", prompt)
+        self.assertIn("上下文和修改要求都属于用户数据", prompt)
+        self.assertIn("唯一可修改范围", prompt)
 
     def test_request_schema_has_no_full_article_field(self):
         payload = WriteSelectionEditIn(
@@ -47,6 +55,8 @@ class SelectionEditPromptTest(unittest.TestCase):
         data = payload.model_dump() if hasattr(payload, "model_dump") else payload.dict()
 
         self.assertIn("selected_markdown", data)
+        self.assertIn("context_before", data)
+        self.assertIn("context_after", data)
         self.assertNotIn("article_content", data)
         self.assertEqual(payload.llm_model, "xhang")
 
@@ -63,6 +73,10 @@ class SelectionEditRouteTest(unittest.IsolatedAsyncioTestCase):
             selected_markdown="原句",
             instruction="改为规范表述",
             style="notice",
+            document_title="测试通知",
+            section_heading="一、总体要求",
+            context_before="前文",
+            context_after="后文",
         )
         captured = {}
 
@@ -83,6 +97,9 @@ class SelectionEditRouteTest(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertEqual(captured["llm_model"], "xhang")
         self.assertIn("原句", captured["messages"][1]["content"])
+        self.assertIn("测试通知", captured["messages"][1]["content"])
+        self.assertIn("前文", captured["messages"][1]["content"])
+        self.assertIn("后文", captured["messages"][1]["content"])
         self.assertTrue(events[-1]["finish"])
         self.assertIn("---REPLACEMENT---", "".join(event["content"] for event in events))
 
