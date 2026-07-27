@@ -100,9 +100,31 @@ assert.equal(shouldUsePlainTextInsertion('## 二、工作要求\n\n正文', true
 assert.equal(shouldUsePlainTextInsertion('普通替换文本', false), false)
 
 assert.equal(selectionTextsMatch('第一段\n第二段', '第一段\n\n第二段'), true)
+assert.equal(selectionTextsMatch('第一段 第二段', '第一段\n\t第二段'), true)
 assert.equal(selectionTextsMatch('正文内容', '一、严格落实网络安全责任制\n正文内容'), false)
 assert.equal(selectionTextsMatch('正文内容', '正文内容补充'), false)
-assert.equal(selectionTextsMatch(' 正文内容', '正文内容'), false)
+assert.equal(selectionTextsMatch(' 正文内容', '正文内容'), true)
+
+const fiveSelectedItems = [
+  '一、各单位应高度重视网络安全工作。',
+  '二、各单位须定期开展网络安全自查。',
+  '三、各单位应加强网络安全意识教育。',
+  '四、发生网络安全事件应立即启动应急预案。',
+  '五、应加强离退休教职工网络信息安全管理。',
+]
+assert.equal(
+  selectionTextsMatch(fiveSelectedItems.join('\n'), fiveSelectedItems.join('\n\n')),
+  true,
+  '跨五段选区不能因为编辑器内部换行数量不同而被拒绝',
+)
+assert.equal(
+  selectionTextsMatch(
+    fiveSelectedItems.join('\n'),
+    ['一、严格落实网络安全责任制', ...fiveSelectedItems].join('\n\n'),
+  ),
+  false,
+  '缓存选区额外包含用户未选择的标题时必须拒绝',
+)
 
 const exactEditor = createEditor({
   namespace: 'exact-selection-replacement',

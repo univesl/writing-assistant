@@ -157,16 +157,13 @@ export function insertPlainTextSelectionReplacement(selection, replacement) {
 }
 
 /**
- * 浏览器原生 Selection 与 Lexical RangeSelection 对块边界的换行数量可能不同：
- * 浏览器通常返回一个换行，Lexical 可能返回两个。这里仅统一这种结构性差异，
- * 不 trim、不折叠普通空格，也不忽略任何可见字符，避免把扩大的选区误判为一致。
+ * 浏览器原生 Selection 与 Lexical RangeSelection 会用不同数量的空格、制表符和
+ * 换行表示相同的跨块选区。选区端点仍由 DOM Range 决定；这里仅比较可见字符，
+ * 用于阻止缓存选区意外多带标题或漏掉正文，不把编辑器内部空白表示当作失败。
  */
 export function selectionTextsMatch(nativeText, lexicalText) {
   const normalize = value => String(value ?? '')
-    .replace(/\r\n?/g, '\n')
-    .replace(/\u00a0/g, ' ')
-    .replace(/\u200b/g, '')
-    .replace(/\n{2,}/g, '\n')
+    .replace(/[\s\u00a0\u200b\u2060\ufeff]+/gu, '')
 
   return normalize(nativeText) === normalize(lexicalText)
 }

@@ -77,6 +77,7 @@ const aiSelectionBridgePlugin = realmPlugin({
         const domSelection = rootElement?.ownerDocument?.defaultView?.getSelection?.()
         const nativeSelectionIsUsable = Boolean(
           domSelection &&
+          domSelection.rangeCount > 0 &&
           !domSelection.isCollapsed &&
           domSelection.anchorNode &&
           domSelection.focusNode &&
@@ -89,18 +90,21 @@ const aiSelectionBridgePlugin = realmPlugin({
         let captureError = ''
 
         editor?.getEditorState().read(() => {
-          // 始终从浏览器当前真实高亮范围重建 Lexical 选区。$getSelection() 可能仍是
-          // MDXEditor 在上一次 selectionchange 中保存的父块级选区，不能作为用户意图。
-          const selection = nativeSelectionIsUsable
+          // 首选从浏览器当前真实高亮范围重建 Lexical 选区。若复杂块边界无法直接
+          // 转换，才允许使用编辑器缓存选区，而且其可见字符必须与浏览器高亮完全一致。
+          const domRangeSelection = nativeSelectionIsUsable
             ? $createRangeSelectionFromDom(domSelection, editor)
             : null
+          const cachedSelection = $getSelection()
+          const selectionCandidates = [domRangeSelection, cachedSelection]
+          const selection = selectionCandidates.find(candidate => (
+            $isRangeSelection(candidate) &&
+            !candidate.isCollapsed() &&
+            selectionTextsMatch(nativeSelectedText, candidate.getTextContent())
+          ))
+
           if ($isRangeSelection(selection) && !selection.isCollapsed()) {
             const lexicalSelectedText = selection.getTextContent()
-            if (!selectionTextsMatch(nativeSelectedText, lexicalSelectedText)) {
-              captureError = '编辑器未能准确对应您实际划选的文字，本次操作已停止；请重新选择后再试'
-              return
-            }
-
             selectionSnapshot = selection.clone()
             selectionCapture = captureSelectionContext(selection, $getRoot())
             if (selectionCapture) {
@@ -108,6 +112,8 @@ const aiSelectionBridgePlugin = realmPlugin({
               selectionCapture.selectedText = nativeSelectedText
               selectionCapture.lexicalSelectedText = lexicalSelectedText
             }
+          } else if (nativeSelectionIsUsable) {
+            captureError = '编辑器未能定位完整选区，文章未作修改；请重新拖选一次'
           }
         })
 
@@ -194,7 +200,7 @@ const aiSelectionBridgePlugin = realmPlugin({
   },
 })
 
-function AiEditToolbarButton({ onClick, disabled }) {
+function AiEditToolbarButton({ onActivate, disabled }) {
   return (
     <button
       type="button"
@@ -203,9 +209,15 @@ function AiEditToolbarButton({ onClick, disabled }) {
       className="ai-edit-toolbar-button"
       disabled={disabled}
       onMouseDown={(event) => {
+        if (event.button !== 0) return
         event.preventDefault()
+        // 必须在按钮取得焦点、浏览器清空原生 Selection 之前冻结选区。
+        onActivate?.()
       }}
-      onClick={onClick}
+      onClick={(event) => {
+        // 键盘触发的 click 没有 mouseDown，detail 为 0；鼠标 click 已在上面处理。
+        if (event.detail === 0) onActivate?.()
+      }}
     >
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
         <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z" />
@@ -241,7 +253,7 @@ function MarkdownArticleEditor({
           <Separator />
           <BlockTypeSelect />
           <Separator />
-          <AiEditToolbarButton onClick={onAiEditRequest} disabled={interactionLocked} />
+          <AiEditToolbarButton onActivate={onAiEditRequest} disabled={interactionLocked} />
           <Separator />
           <BoldItalicUnderlineToggles />
           <Separator />
