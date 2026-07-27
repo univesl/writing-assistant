@@ -113,7 +113,14 @@ export function parseSelectionEditOutput(
     .slice(replacementIndex + replacementMarker.length, summaryIndex)
     .trim()
   const summaryContent = output.slice(summaryIndex + summaryMarker.length).trim() || fallbackSummary
-  const isDeletion = rawReplacement.length === 0 || rawReplacement === deletionMarker
+  if (!rawReplacement) {
+    throw new Error('AI 返回的选区替换内容为空，且未使用明确的删除标记；已拒绝应用')
+  }
+  if (rawReplacement.includes(deletionMarker) && rawReplacement !== deletionMarker) {
+    throw new Error('AI 返回的删除标记格式异常，已拒绝应用')
+  }
+
+  const isDeletion = rawReplacement === deletionMarker
   const replacementMarkdown = isDeletion ? '' : rawReplacement
 
   if (replacementMarkdown.includes('---ARTICLE---')) {

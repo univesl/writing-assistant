@@ -259,12 +259,9 @@ function EditorSidebar({
     }
   }, [])
 
-  const openAiEditDialogFromToolbar = useCallback((preparedSelection) => {
+  const openAiEditDialogFromToolbar = useCallback((selected) => {
     // 鼠标按下按钮后，浏览器会把焦点移出正文并清空原生高亮。
-    // 优先使用 pointerdown 阶段冻结的选区，不能在 click 阶段重新猜测范围。
-    const selected = preparedSelection === undefined
-      ? readSelectedEditorSelection()
-      : preparedSelection
+    // 这里只消费 pointerdown 阶段冻结的结果，不能在 click 阶段重新猜测范围。
     if (selected?.error) {
       setShowAIDialog(false)
       setAiEditError('')
@@ -285,7 +282,7 @@ function EditorSidebar({
     setAiEditNotice('')
     setAIDialogPosition(getDefaultAiDialogPosition())
     setShowAIDialog(true)
-  }, [getDefaultAiDialogPosition, readSelectedEditorSelection, showAiEditNotice])
+  }, [getDefaultAiDialogPosition, showAiEditNotice])
 
   const resetAiEditDialog = useCallback(() => {
     setShowAIDialog(false)
@@ -351,7 +348,6 @@ function EditorSidebar({
           style: 'general',
           llm_model: 'xhang',
         },
-        fallbackSummary: '已完成修改',
       })
 
       if (editSessionId !== currentSessionIdRef.current) {

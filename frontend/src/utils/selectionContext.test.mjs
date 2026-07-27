@@ -192,4 +192,77 @@ assert.equal(
   '一、严格落实网络安全责任制\n各二级单位应进一步明确网络安全管理职责。原有后句。',
 )
 
+function applyPartialPlainTextEdit({
+  text,
+  selectedText,
+  replacement,
+  backward = false,
+}) {
+  const editor = createEditor({
+    namespace: `partial-edit-${backward}-${selectedText}`,
+    onError(error) {
+      throw error
+    },
+  })
+  let result = ''
+
+  editor.update(() => {
+    const root = $getRoot()
+    const textNode = $createTextNode(text)
+    root.clear()
+    root.append($createParagraphNode().append(textNode))
+
+    const start = text.indexOf(selectedText)
+    const end = start + selectedText.length
+    const selection = $createRangeSelection()
+    if (backward) {
+      selection.anchor.set(textNode.getKey(), end, 'text')
+      selection.focus.set(textNode.getKey(), start, 'text')
+    } else {
+      selection.anchor.set(textNode.getKey(), start, 'text')
+      selection.focus.set(textNode.getKey(), end, 'text')
+    }
+    $setSelection(selection)
+
+    if (replacement === '') {
+      selection.removeText()
+    } else {
+      insertPlainTextSelectionReplacement(selection, replacement)
+    }
+    result = root.getTextContent()
+  }, { discrete: true })
+
+  return result
+}
+
+const protectedSentence = '前置保护 KEEP-BEFORE。原句需要修改。后置保护 KEEP-AFTER。'
+assert.equal(
+  applyPartialPlainTextEdit({
+    text: protectedSentence,
+    selectedText: '原句需要修改。',
+    replacement: '修改后的规范表述。',
+  }),
+  '前置保护 KEEP-BEFORE。修改后的规范表述。后置保护 KEEP-AFTER。',
+  '正向段内替换必须逐字保留选区两侧内容',
+)
+assert.equal(
+  applyPartialPlainTextEdit({
+    text: protectedSentence,
+    selectedText: '原句需要修改。',
+    replacement: '反向选区修改结果。',
+    backward: true,
+  }),
+  '前置保护 KEEP-BEFORE。反向选区修改结果。后置保护 KEEP-AFTER。',
+  '反向拖选必须替换同一个精确范围',
+)
+assert.equal(
+  applyPartialPlainTextEdit({
+    text: protectedSentence,
+    selectedText: '原句需要修改。',
+    replacement: '',
+  }),
+  '前置保护 KEEP-BEFORE。后置保护 KEEP-AFTER。',
+  '删除段内选区不能删除或复制相邻内容',
+)
+
 console.log('selection context extraction passed')

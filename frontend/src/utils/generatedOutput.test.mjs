@@ -54,14 +54,10 @@ assert.deepEqual(
   'selection edit output should return only the replacement fragment',
 )
 
-assert.deepEqual(
-  parseSelectionEditOutput('---REPLACEMENT---\n\n---SUMMARY---\n已删除重复内容'),
-  {
-    replacementMarkdown: '',
-    summaryContent: '已删除重复内容',
-    isDeletion: true,
-  },
-  'an intentionally empty replacement should represent deletion',
+assert.throws(
+  () => parseSelectionEditOutput('---REPLACEMENT---\n\n---SUMMARY---\n已删除重复内容'),
+  /未使用明确的删除标记/,
+  'an empty or truncated replacement must not be treated as a destructive edit',
 )
 
 assert.deepEqual(
@@ -74,6 +70,14 @@ assert.deepEqual(
     isDeletion: true,
   },
   'the explicit deletion marker should never be inserted into the editor',
+)
+
+assert.throws(
+  () => parseSelectionEditOutput(
+    '---REPLACEMENT---\n[[DELETE_SELECTION]]\n补充说明\n---SUMMARY---\n已删除所选内容',
+  ),
+  /删除标记格式异常/,
+  'the deletion marker must be the complete replacement instead of mixed with visible text',
 )
 
 assert.throws(
