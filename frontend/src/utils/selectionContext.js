@@ -2,6 +2,7 @@ const NEIGHBOR_BLOCK_COUNT = 2
 const CONTEXT_SIDE_CHAR_LIMIT = 3000
 const DOCUMENT_TITLE_CHAR_LIMIT = 300
 const SECTION_PATH_CHAR_LIMIT = 800
+const EDITABLE_BLOCK_TYPES = new Set(['heading', 'paragraph', 'quote', 'listitem'])
 
 function normalizeContextText(value) {
   return String(value || '')
@@ -67,6 +68,15 @@ function getTopLevelBlockForPoint(point, root, preferPrevious) {
   return parent?.is(root) ? current : null
 }
 
+function getEditableBlockForPoint(point, root) {
+  let current = point.getNode()
+  while (current && !current.is(root)) {
+    if (EDITABLE_BLOCK_TYPES.has(current.getType?.())) return current
+    current = current.getParent?.()
+  }
+  return null
+}
+
 function setPoint(target, source) {
   target.set(source.key, source.offset, source.type)
 }
@@ -128,6 +138,24 @@ function joinContextParts(parts) {
   return parts.map(normalizeContextText).filter(Boolean).join('\n\n')
 }
 
+export function shouldUsePlainTextInsertion(replacement, isSingleBlockSelection) {
+  if (!isSingleBlockSelection) return false
+
+  const markdown = String(replacement || '')
+  const hasBlockMarkdown = /(^|\n)\s{0,3}(?:#{1,6}\s|>|[-+*]\s|\d+[.)]\s|```|~~~)/m.test(markdown)
+  const hasInlineMarkdown = /(\*\*|__|~~|`|!\[|\[[^\]]+\]\([^)]+\))/.test(markdown)
+  const hasTableMarkdown = /^\s*\|.*\|\s*$/m.test(markdown)
+  return !hasBlockMarkdown && !hasInlineMarkdown && !hasTableMarkdown
+}
+
+export function insertPlainTextSelectionReplacement(selection, replacement) {
+  if (String(replacement).includes('\n')) {
+    selection.insertRawText(replacement)
+  } else {
+    selection.insertText(replacement)
+  }
+}
+
 /**
  * 从当前 Lexical RangeSelection 的真实树位置提取只读语义上下文。
  *
@@ -143,6 +171,8 @@ export function captureSelectionContext(selection, root) {
   const startBlock = getTopLevelBlockForPoint(logicalStart, root, false)
   const endBlock = getTopLevelBlockForPoint(logicalEnd, root, true)
   if (!startBlock || !endBlock) return null
+  const startEditableBlock = getEditableBlockForPoint(logicalStart, root)
+  const endEditableBlock = getEditableBlockForPoint(logicalEnd, root)
 
   const children = root.getChildren()
   let startIndex = startBlock.getIndexWithinParent()
@@ -179,9 +209,17 @@ export function captureSelectionContext(selection, root) {
   ])
 
   return {
-    document_title: getDocumentTitle(children),
-    section_heading: getSectionPath(children, startIndex),
-    context_before: limitContextEnd(contextBefore, CONTEXT_SIDE_CHAR_LIMIT),
-    context_after: limitContextStart(contextAfter, CONTEXT_SIDE_CHAR_LIMIT),
+    selectedText: selection.getTextContent(),
+    isSingleBlockSelection: Boolean(
+      startEditableBlock &&
+      endEditableBlock &&
+      startEditableBlock.is(endEditableBlock)
+    ),
+    requestContext: {
+      document_title: getDocumentTitle(children),
+      section_heading: getSectionPath(children, startIndex),
+      context_before: limitContextEnd(contextBefore, CONTEXT_SIDE_CHAR_LIMIT),
+      context_after: limitContextStart(contextAfter, CONTEXT_SIDE_CHAR_LIMIT),
+    },
   }
 }

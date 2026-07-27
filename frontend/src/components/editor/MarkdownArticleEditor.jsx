@@ -28,7 +28,11 @@ import {
   HISTORY_PUSH_TAG,
 } from 'lexical'
 import { useMemo } from 'react'
-import { captureSelectionContext } from '../../utils/selectionContext'
+import {
+  captureSelectionContext,
+  insertPlainTextSelectionReplacement,
+  shouldUsePlainTextInsertion,
+} from '../../utils/selectionContext'
 
 const EDITOR_TRANSLATIONS = {
   'toolbar.undo': '撤销 {{shortcut}}',
@@ -68,20 +72,29 @@ const aiSelectionBridgePlugin = realmPlugin({
       capture() {
         const editor = realm.getValue(activeEditor$)
         let selectionSnapshot = null
-        let readOnlyContext = null
+        let selectionCapture = null
 
         editor?.getEditorState().read(() => {
           const selection = $getSelection()
           if ($isRangeSelection(selection) && !selection.isCollapsed()) {
             selectionSnapshot = selection.clone()
-            readOnlyContext = captureSelectionContext(selection, $getRoot())
+            selectionCapture = captureSelectionContext(selection, $getRoot())
           }
         })
 
-        capturedSelection = selectionSnapshot && readOnlyContext
-          ? { editor, selectionSnapshot }
+        capturedSelection = selectionSnapshot && selectionCapture
+          ? {
+              editor,
+              selectionSnapshot,
+              isSingleBlockSelection: selectionCapture.isSingleBlockSelection,
+            }
           : null
-        return capturedSelection ? readOnlyContext : null
+        return capturedSelection
+          ? {
+              selectedMarkdown: selectionCapture.selectedText,
+              context: selectionCapture.requestContext,
+            }
+          : null
       },
 
       apply(replacementMarkdown) {
@@ -89,13 +102,16 @@ const aiSelectionBridgePlugin = realmPlugin({
           throw new Error('原选区已失效，请重新选择需要修改的内容')
         }
 
-        const { editor, selectionSnapshot } = capturedSelection
+        const { editor, selectionSnapshot, isSingleBlockSelection } = capturedSelection
         if (!editor || realm.getValue(activeEditor$) !== editor) {
           capturedSelection = null
           throw new Error('编辑器焦点已变化，请重新选择需要修改的内容')
         }
 
         const replacement = replacementMarkdown ?? ''
+        const insertAsPlainText = Boolean(
+          replacement && shouldUsePlainTextInsertion(replacement, isSingleBlockSelection)
+        )
         editor.update(() => {
           const restoredSelection = selectionSnapshot.clone()
           $setSelection(restoredSelection)
@@ -114,13 +130,19 @@ const aiSelectionBridgePlugin = realmPlugin({
               root.clear()
               root.append($createParagraphNode())
             }
+          } else if (insertAsPlainText) {
+            const activeSelection = $getSelection()
+            if (!$isRangeSelection(activeSelection) || activeSelection.isCollapsed()) {
+              throw new Error('无法恢复原选区，请重新选择需要修改的内容')
+            }
+            insertPlainTextSelectionReplacement(activeSelection, replacement)
           }
         }, {
           discrete: true,
-          ...(replacement ? {} : { tag: HISTORY_PUSH_TAG }),
+          ...((!replacement || insertAsPlainText) ? { tag: HISTORY_PUSH_TAG } : {}),
         })
 
-        if (replacement) {
+        if (replacement && !insertAsPlainText) {
           realm.pub(insertMarkdown$, replacement)
         }
         capturedSelection = null

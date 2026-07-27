@@ -32,7 +32,56 @@ export function parseGeneratedOutput(output, fallbackSummary = '已生成文章'
   }
 }
 
-export function parseSelectionEditOutput(output, fallbackSummary = '已完成选区修改') {
+function normalizeBoundaryLine(value) {
+  return String(value || '')
+    .trim()
+    .replace(/^#{1,6}\s+/, '')
+    .replace(/^(?:[-+*]|\d+[.)])\s+/, '')
+    .replace(/\s+/g, ' ')
+}
+
+function meaningfulLines(value) {
+  return String(value || '')
+    .split(/\r?\n/)
+    .map(normalizeBoundaryLine)
+    .filter(line => line.length >= 4)
+}
+
+function assertReplacementDoesNotCopyReadOnlyContext(
+  replacement,
+  { selectedMarkdown = '', contextBefore = '', contextAfter = '' } = {},
+) {
+  if (!replacement) return
+
+  const replacementLines = meaningfulLines(replacement)
+  if (replacementLines.length === 0) return
+
+  const selectedLines = new Set(meaningfulLines(selectedMarkdown))
+  const firstReplacementLine = replacementLines[0]
+  const lastReplacementLine = replacementLines.at(-1)
+  const beforeCandidates = meaningfulLines(contextBefore).slice(-3)
+  const afterCandidates = meaningfulLines(contextAfter).slice(0, 3)
+
+  const copiedBefore = beforeCandidates.find(line => (
+    line === firstReplacementLine && !selectedLines.has(line)
+  ))
+  if (copiedBefore) {
+    throw new Error(`AI 返回内容重复了选区外的前文“${copiedBefore}”，已拒绝应用`)
+  }
+
+  const copiedAfter = afterCandidates.find(line => (
+    line === lastReplacementLine && !selectedLines.has(line)
+  ))
+  if (copiedAfter) {
+    throw new Error(`AI 返回内容重复了选区外的后文“${copiedAfter}”，已拒绝应用`)
+  }
+}
+
+export function parseSelectionEditOutput(
+  output,
+  fallbackSummary = '已完成选区修改',
+  selectionBoundary = {},
+) {
   const replacementMarker = '---REPLACEMENT---'
   const summaryMarker = '---SUMMARY---'
   const deletionMarker = '[[DELETE_SELECTION]]'
@@ -53,6 +102,8 @@ export function parseSelectionEditOutput(output, fallbackSummary = '已完成选
   if (replacementMarkdown.includes('---ARTICLE---')) {
     throw new Error('AI 错误返回了整篇文章，已拒绝覆盖编辑器内容')
   }
+
+  assertReplacementDoesNotCopyReadOnlyContext(replacementMarkdown, selectionBoundary)
 
   return {
     replacementMarkdown,

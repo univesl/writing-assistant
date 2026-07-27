@@ -82,6 +82,34 @@ assert.throws(
   'legacy whole-article output must not be accepted by selection editing',
 )
 
+assert.throws(
+  () => parseSelectionEditOutput(
+    '---REPLACEMENT---\n一、严格落实网络安全责任制\n扩写后的正文。\n---SUMMARY---\n已扩写',
+    '已完成选区修改',
+    {
+      selectedMarkdown: '原正文。',
+      contextBefore: '一、严格落实网络安全责任制',
+      contextAfter: '二、完善网络安全应急预案',
+    },
+  ),
+  /重复了选区外的前文/,
+  'a copied read-only heading must be rejected before it can duplicate outside the selection',
+)
+
+assert.deepEqual(
+  parseSelectionEditOutput(
+    '---REPLACEMENT---\n一、严格落实网络安全责任制\n扩写后的正文。\n---SUMMARY---\n已扩写',
+    '已完成选区修改',
+    {
+      selectedMarkdown: '一、严格落实网络安全责任制\n原正文。',
+      contextBefore: '现将有关事项通知如下：',
+      contextAfter: '二、完善网络安全应急预案',
+    },
+  ).replacementMarkdown,
+  '一、严格落实网络安全责任制\n扩写后的正文。',
+  'a heading that is inside the exact selection remains valid replacement content',
+)
+
 const splitEvent = 'data: {"content":"跨分块内容","finish":false}\n\n'
 const firstHalf = encoder.encode(splitEvent.slice(0, 18))
 const secondHalf = encoder.encode(splitEvent.slice(18))

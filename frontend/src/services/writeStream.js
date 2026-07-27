@@ -117,7 +117,11 @@ export async function streamSelectionEdit({
 
     return {
       output,
-      ...parseSelectionEditOutput(output, fallbackSummary),
+      ...parseSelectionEditOutput(output, fallbackSummary, {
+        selectedMarkdown: payload.selected_markdown,
+        contextBefore: payload.context_before,
+        contextAfter: payload.context_after,
+      }),
     }
   } catch (error) {
     if (error?.name === 'AbortError') {

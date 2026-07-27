@@ -230,11 +230,11 @@ function EditorSidebar({
   }, [])
 
   const readSelectedEditorSelection = useCallback(() => {
-    const context = selectionBridgeRef.current?.capture?.()
-    if (!context) return null
+    const captured = selectionBridgeRef.current?.capture?.()
+    if (!captured) return null
 
-    const markdown = mdxEditorRef.current?.getSelectionMarkdown?.() || ''
-    if (markdown.trim()) return { markdown, context }
+    const markdown = captured.selectedMarkdown || ''
+    if (markdown.trim()) return { markdown, context: captured.context }
 
     selectionBridgeRef.current?.clear?.()
     return null

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import {
+  $createLineBreakNode,
   $createParagraphNode,
   $createRangeSelection,
   $createTextNode,
@@ -9,7 +10,11 @@ import {
 } from 'lexical'
 import { $createHeadingNode, HeadingNode } from '@lexical/rich-text'
 
-import { captureSelectionContext } from './selectionContext.js'
+import {
+  captureSelectionContext,
+  insertPlainTextSelectionReplacement,
+  shouldUsePlainTextInsertion,
+} from './selectionContext.js'
 
 function paragraph(text) {
   return $createParagraphNode().append($createTextNode(text))
@@ -63,13 +68,15 @@ function captureFixture({ backward = false, crossBlock = false } = {}) {
 }
 
 const sameBlock = captureFixture()
-assert.equal(sameBlock.document_title, '关于推进专项工作的通知')
-assert.equal(sameBlock.section_heading, '二、工作要求')
-assert.match(sameBlock.context_before, /各单位应高度重视并做好组织协调。/)
-assert.match(sameBlock.context_before, /各单位$/)
-assert.match(sameBlock.context_after, /^。/)
-assert.match(sameBlock.context_after, /材料应当真实准确，不得遗漏重要事项。/)
-assert.doesNotMatch(sameBlock.context_before, /七月三十日/)
+assert.equal(sameBlock.requestContext.document_title, '关于推进专项工作的通知')
+assert.equal(sameBlock.requestContext.section_heading, '二、工作要求')
+assert.match(sameBlock.requestContext.context_before, /各单位应高度重视并做好组织协调。/)
+assert.match(sameBlock.requestContext.context_before, /各单位$/)
+assert.match(sameBlock.requestContext.context_after, /^。/)
+assert.match(sameBlock.requestContext.context_after, /材料应当真实准确，不得遗漏重要事项。/)
+assert.doesNotMatch(sameBlock.requestContext.context_before, /七月三十日/)
+assert.equal(sameBlock.selectedText, '要在七月三十日前提交完整材料')
+assert.equal(sameBlock.isSingleBlockSelection, true)
 
 assert.deepEqual(
   captureFixture({ backward: true }),
@@ -78,9 +85,51 @@ assert.deepEqual(
 )
 
 const crossBlock = captureFixture({ crossBlock: true })
-assert.match(crossBlock.context_before, /各单位$/)
-assert.match(crossBlock.context_after, /^真实准确，不得遗漏重要事项。/)
-assert.match(crossBlock.context_after, /联系人及联系方式另行通知。/)
-assert.doesNotMatch(crossBlock.context_after, /^材料应当/)
+assert.match(crossBlock.requestContext.context_before, /各单位$/)
+assert.match(crossBlock.requestContext.context_after, /^真实准确，不得遗漏重要事项。/)
+assert.match(crossBlock.requestContext.context_after, /联系人及联系方式另行通知。/)
+assert.doesNotMatch(crossBlock.requestContext.context_after, /^材料应当/)
+assert.equal(crossBlock.isSingleBlockSelection, false)
+
+assert.equal(
+  shouldUsePlainTextInsertion('五、严格网络安全管理制度，加强信息报送。\n\n各单位应严格执行有关制度。', true),
+  true,
+)
+assert.equal(shouldUsePlainTextInsertion('## 二、工作要求\n\n正文', true), false)
+assert.equal(shouldUsePlainTextInsertion('普通替换文本', false), false)
+
+const exactEditor = createEditor({
+  namespace: 'exact-selection-replacement',
+  onError(error) {
+    throw error
+  },
+})
+let exactCapture = null
+let exactResult = ''
+exactEditor.update(() => {
+  const root = $getRoot()
+  const section = $createParagraphNode()
+  const headingText = $createTextNode('一、严格落实网络安全责任制')
+  const bodyText = $createTextNode('各二级单位应明确网络安全管理职责。原有后句。')
+  root.clear()
+  section.append(headingText, $createLineBreakNode(), bodyText)
+  root.append(section)
+
+  const selection = $createRangeSelection()
+  selection.anchor.set(bodyText.getKey(), 0, 'text')
+  selection.focus.set(bodyText.getKey(), '各二级单位应明确网络安全管理职责。'.length, 'text')
+  $setSelection(selection)
+  exactCapture = captureSelectionContext(selection, root)
+  insertPlainTextSelectionReplacement(selection, '各二级单位应进一步明确网络安全管理职责。')
+  exactResult = root.getTextContent()
+}, { discrete: true })
+
+assert.equal(exactCapture.selectedText, '各二级单位应明确网络安全管理职责。')
+assert.match(exactCapture.requestContext.context_before, /一、严格落实网络安全责任制/)
+assert.equal((exactResult.match(/一、严格落实网络安全责任制/g) || []).length, 1)
+assert.equal(
+  exactResult,
+  '一、严格落实网络安全责任制\n各二级单位应进一步明确网络安全管理职责。原有后句。',
+)
 
 console.log('selection context extraction passed')
