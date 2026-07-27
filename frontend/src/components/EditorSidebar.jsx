@@ -232,6 +232,7 @@ function EditorSidebar({
   const readSelectedEditorSelection = useCallback(() => {
     const captured = selectionBridgeRef.current?.capture?.()
     if (!captured) return null
+    if (captured.error) return { error: captured.error }
 
     const markdown = captured.selectedMarkdown || ''
     if (markdown.trim()) return { markdown, context: captured.context }
@@ -260,6 +261,12 @@ function EditorSidebar({
 
   const openAiEditDialogFromToolbar = useCallback(() => {
     const selected = readSelectedEditorSelection()
+    if (selected?.error) {
+      setShowAIDialog(false)
+      setAiEditError('')
+      showAiEditNotice(selected.error)
+      return
+    }
     if (!selected) {
       setShowAIDialog(false)
       setAiEditError('')

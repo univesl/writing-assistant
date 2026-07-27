@@ -13,6 +13,7 @@ import { $createHeadingNode, HeadingNode } from '@lexical/rich-text'
 import {
   captureSelectionContext,
   insertPlainTextSelectionReplacement,
+  selectionTextsMatch,
   shouldUsePlainTextInsertion,
 } from './selectionContext.js'
 
@@ -97,6 +98,11 @@ assert.equal(
 )
 assert.equal(shouldUsePlainTextInsertion('## 二、工作要求\n\n正文', true), false)
 assert.equal(shouldUsePlainTextInsertion('普通替换文本', false), false)
+
+assert.equal(selectionTextsMatch('第一段\n第二段', '第一段\n\n第二段'), true)
+assert.equal(selectionTextsMatch('正文内容', '一、严格落实网络安全责任制\n正文内容'), false)
+assert.equal(selectionTextsMatch('正文内容', '正文内容补充'), false)
+assert.equal(selectionTextsMatch(' 正文内容', '正文内容'), false)
 
 const exactEditor = createEditor({
   namespace: 'exact-selection-replacement',

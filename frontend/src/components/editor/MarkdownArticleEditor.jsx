@@ -20,6 +20,7 @@ import {
 } from '@mdxeditor/editor'
 import '@mdxeditor/editor/style.css'
 import {
+  $createRangeSelectionFromDom,
   $createParagraphNode,
   $getRoot,
   $getSelection,
@@ -31,6 +32,7 @@ import { useMemo } from 'react'
 import {
   captureSelectionContext,
   insertPlainTextSelectionReplacement,
+  selectionTextsMatch,
   shouldUsePlainTextInsertion,
 } from '../../utils/selectionContext'
 
@@ -71,14 +73,41 @@ const aiSelectionBridgePlugin = realmPlugin({
     bridgeRef.current = {
       capture() {
         const editor = realm.getValue(activeEditor$)
+        const rootElement = editor?.getRootElement?.()
+        const domSelection = rootElement?.ownerDocument?.defaultView?.getSelection?.()
+        const nativeSelectionIsUsable = Boolean(
+          domSelection &&
+          !domSelection.isCollapsed &&
+          domSelection.anchorNode &&
+          domSelection.focusNode &&
+          rootElement.contains(domSelection.anchorNode) &&
+          rootElement.contains(domSelection.focusNode)
+        )
+        const nativeSelectedText = nativeSelectionIsUsable ? domSelection.toString() : ''
         let selectionSnapshot = null
         let selectionCapture = null
+        let captureError = ''
 
         editor?.getEditorState().read(() => {
-          const selection = $getSelection()
+          // 始终从浏览器当前真实高亮范围重建 Lexical 选区。$getSelection() 可能仍是
+          // MDXEditor 在上一次 selectionchange 中保存的父块级选区，不能作为用户意图。
+          const selection = nativeSelectionIsUsable
+            ? $createRangeSelectionFromDom(domSelection, editor)
+            : null
           if ($isRangeSelection(selection) && !selection.isCollapsed()) {
+            const lexicalSelectedText = selection.getTextContent()
+            if (!selectionTextsMatch(nativeSelectedText, lexicalSelectedText)) {
+              captureError = '编辑器未能准确对应您实际划选的文字，本次操作已停止；请重新选择后再试'
+              return
+            }
+
             selectionSnapshot = selection.clone()
             selectionCapture = captureSelectionContext(selection, $getRoot())
+            if (selectionCapture) {
+              // 侧栏和模型必须看到浏览器中实际高亮的文字，而不是编辑器重序列化的父块。
+              selectionCapture.selectedText = nativeSelectedText
+              selectionCapture.lexicalSelectedText = lexicalSelectedText
+            }
           }
         })
 
@@ -87,8 +116,12 @@ const aiSelectionBridgePlugin = realmPlugin({
               editor,
               selectionSnapshot,
               isSingleBlockSelection: selectionCapture.isSingleBlockSelection,
+              lexicalSelectedText: selectionCapture.lexicalSelectedText,
             }
           : null
+        if (captureError) {
+          return { error: captureError }
+        }
         return capturedSelection
           ? {
               selectedMarkdown: selectionCapture.selectedText,
@@ -102,7 +135,12 @@ const aiSelectionBridgePlugin = realmPlugin({
           throw new Error('原选区已失效，请重新选择需要修改的内容')
         }
 
-        const { editor, selectionSnapshot, isSingleBlockSelection } = capturedSelection
+        const {
+          editor,
+          selectionSnapshot,
+          isSingleBlockSelection,
+          lexicalSelectedText,
+        } = capturedSelection
         if (!editor || realm.getValue(activeEditor$) !== editor) {
           capturedSelection = null
           throw new Error('编辑器焦点已变化，请重新选择需要修改的内容')
@@ -116,11 +154,16 @@ const aiSelectionBridgePlugin = realmPlugin({
           const restoredSelection = selectionSnapshot.clone()
           $setSelection(restoredSelection)
 
+          const activeSelection = $getSelection()
+          if (
+            !$isRangeSelection(activeSelection) ||
+            activeSelection.isCollapsed() ||
+            !selectionTextsMatch(activeSelection.getTextContent(), lexicalSelectedText)
+          ) {
+            throw new Error('无法精确恢复原选区，文章未作修改；请重新选择需要修改的内容')
+          }
+
           if (!replacement) {
-            const activeSelection = $getSelection()
-            if (!$isRangeSelection(activeSelection) || activeSelection.isCollapsed()) {
-              throw new Error('无法恢复原选区，请重新选择需要修改的内容')
-            }
             activeSelection.removeText()
 
             // Lexical 会保留被清空块的类型（例如空标题会序列化为 "#"）。
@@ -131,10 +174,6 @@ const aiSelectionBridgePlugin = realmPlugin({
               root.append($createParagraphNode())
             }
           } else if (insertAsPlainText) {
-            const activeSelection = $getSelection()
-            if (!$isRangeSelection(activeSelection) || activeSelection.isCollapsed()) {
-              throw new Error('无法恢复原选区，请重新选择需要修改的内容')
-            }
             insertPlainTextSelectionReplacement(activeSelection, replacement)
           }
         }, {

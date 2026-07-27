@@ -157,6 +157,21 @@ export function insertPlainTextSelectionReplacement(selection, replacement) {
 }
 
 /**
+ * 浏览器原生 Selection 与 Lexical RangeSelection 对块边界的换行数量可能不同：
+ * 浏览器通常返回一个换行，Lexical 可能返回两个。这里仅统一这种结构性差异，
+ * 不 trim、不折叠普通空格，也不忽略任何可见字符，避免把扩大的选区误判为一致。
+ */
+export function selectionTextsMatch(nativeText, lexicalText) {
+  const normalize = value => String(value ?? '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/\u00a0/g, ' ')
+    .replace(/\u200b/g, '')
+    .replace(/\n{2,}/g, '\n')
+
+  return normalize(nativeText) === normalize(lexicalText)
+}
+
+/**
  * 从当前 Lexical RangeSelection 的真实树位置提取只读语义上下文。
  *
  * 这里只读取标题、章节路径、相邻顶层块，以及选区所在块内紧邻选区的
