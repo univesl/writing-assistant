@@ -84,6 +84,20 @@ assert.throws(
 
 assert.throws(
   () => parseSelectionEditOutput(
+    '---REPLACEMENT---\n一、全面落实网络安全责任制\n扩写后的正文。\n---SUMMARY---\n已扩写',
+    '已完成选区修改',
+    {
+      selectedMarkdown: '原正文。',
+      contextBefore: '一、严格落实网络安全责任制',
+      contextAfter: '二、完善网络安全应急预案',
+    },
+  ),
+  /重复生成了选区外的第“一”项标题/,
+  'a rewritten copy of the same outside numbered heading must also be rejected',
+)
+
+assert.throws(
+  () => parseSelectionEditOutput(
     '---REPLACEMENT---\n一、严格落实网络安全责任制\n扩写后的正文。\n---SUMMARY---\n已扩写',
     '已完成选区修改',
     {

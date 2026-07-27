@@ -47,6 +47,10 @@ function meaningfulLines(value) {
     .filter(line => line.length >= 4)
 }
 
+function numberedHeadingOrdinal(value) {
+  return normalizeBoundaryLine(value).match(/^([一二三四五六七八九十百]+)、/)?.[1] || ''
+}
+
 function normalizeNumberedHeadingSpacing(value) {
   const lines = String(value || '').split(/\r?\n/)
   const numberedHeading = /^\s*(?:[一二三四五六七八九十百]+、|第[一二三四五六七八九十百]+[章节条款])[^。！？\n]{1,80}\s*$/
@@ -73,6 +77,9 @@ function assertReplacementDoesNotCopyReadOnlyContext(
   if (replacementLines.length === 0) return
 
   const selectedLines = new Set(meaningfulLines(selectedMarkdown))
+  const selectedHeadingOrdinals = new Set(
+    meaningfulLines(selectedMarkdown).map(numberedHeadingOrdinal).filter(Boolean)
+  )
   const firstReplacementLine = replacementLines[0]
   const lastReplacementLine = replacementLines.at(-1)
   const beforeCandidates = meaningfulLines(contextBefore).slice(-3)
@@ -83,6 +90,16 @@ function assertReplacementDoesNotCopyReadOnlyContext(
   ))
   if (copiedBefore) {
     throw new Error(`AI 返回内容重复了选区外的前文“${copiedBefore}”，已拒绝应用`)
+  }
+
+  const replacementHeadingOrdinal = numberedHeadingOrdinal(firstReplacementLine)
+  const copiedHeadingOrdinal = beforeCandidates.find(line => (
+    replacementHeadingOrdinal &&
+    numberedHeadingOrdinal(line) === replacementHeadingOrdinal &&
+    !selectedHeadingOrdinals.has(replacementHeadingOrdinal)
+  ))
+  if (copiedHeadingOrdinal) {
+    throw new Error(`AI 返回内容重复生成了选区外的第“${replacementHeadingOrdinal}”项标题，已拒绝应用`)
   }
 
   const copiedAfter = afterCandidates.find(line => (
