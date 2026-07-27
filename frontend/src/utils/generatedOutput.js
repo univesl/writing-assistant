@@ -47,6 +47,22 @@ function meaningfulLines(value) {
     .filter(line => line.length >= 4)
 }
 
+function normalizeNumberedHeadingSpacing(value) {
+  const lines = String(value || '').split(/\r?\n/)
+  const numberedHeading = /^\s*(?:[一二三四五六七八九十百]+、|第[一二三四五六七八九十百]+[章节条款])[^。！？\n]{1,80}\s*$/
+  const normalized = []
+
+  lines.forEach((line, index) => {
+    const isHeading = numberedHeading.test(line)
+    normalized.push(isHeading ? line.trimEnd() : line)
+    if (isHeading && lines[index + 1]?.trim()) {
+      normalized.push('')
+    }
+  })
+
+  return normalized.join('\n')
+}
+
 function assertReplacementDoesNotCopyReadOnlyContext(
   replacement,
   { selectedMarkdown = '', contextBefore = '', contextAfter = '' } = {},
@@ -97,7 +113,7 @@ export function parseSelectionEditOutput(
     .trim()
   const summaryContent = output.slice(summaryIndex + summaryMarker.length).trim() || fallbackSummary
   const isDeletion = rawReplacement.length === 0 || rawReplacement === deletionMarker
-  const replacementMarkdown = isDeletion ? '' : rawReplacement
+  const replacementMarkdown = isDeletion ? '' : normalizeNumberedHeadingSpacing(rawReplacement)
 
   if (replacementMarkdown.includes('---ARTICLE---')) {
     throw new Error('AI 错误返回了整篇文章，已拒绝覆盖编辑器内容')

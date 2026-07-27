@@ -106,8 +106,16 @@ assert.deepEqual(
       contextAfter: '二、完善网络安全应急预案',
     },
   ).replacementMarkdown,
-  '一、严格落实网络安全责任制\n扩写后的正文。',
+  '一、严格落实网络安全责任制\n\n扩写后的正文。',
   'a heading that is inside the exact selection remains valid replacement content',
+)
+
+assert.equal(
+  parseSelectionEditOutput(
+    '---REPLACEMENT---\n五、严格网络安全管理制度并加强信息报送  \n各单位应严格执行有关制度。\n---SUMMARY---\n已合并',
+  ).replacementMarkdown,
+  '五、严格网络安全管理制度并加强信息报送\n\n各单位应严格执行有关制度。',
+  'a numbered section heading must remain a separate Markdown block from its body',
 )
 
 const splitEvent = 'data: {"content":"跨分块内容","finish":false}\n\n'
