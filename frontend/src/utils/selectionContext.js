@@ -4,6 +4,41 @@ const DOCUMENT_TITLE_CHAR_LIMIT = 300
 const SECTION_PATH_CHAR_LIMIT = 800
 const EDITABLE_BLOCK_TYPES = new Set(['heading', 'paragraph', 'quote', 'listitem'])
 
+/**
+ * 保存工具栏 pointerdown 时取得的精确选区，并在后续 click 中只消费一次。
+ * `null` 也是一次有效的捕获结果，不能在 click 阶段再次读取已经消失的选区。
+ */
+export function createPreparedSelectionStore() {
+  let hasPreparedSelection = false
+  let preparedSelection = null
+
+  return {
+    prepare(capture) {
+      preparedSelection = capture?.() ?? null
+      hasPreparedSelection = true
+      return preparedSelection
+    },
+
+    consume(capture) {
+      const selected = hasPreparedSelection
+        ? preparedSelection
+        : (capture?.() ?? null)
+      hasPreparedSelection = false
+      preparedSelection = null
+      return selected
+    },
+
+    clear() {
+      hasPreparedSelection = false
+      preparedSelection = null
+    },
+
+    hasPrepared() {
+      return hasPreparedSelection
+    },
+  }
+}
+
 function normalizeContextText(value) {
   return String(value || '')
     .replace(/\u00a0/g, ' ')

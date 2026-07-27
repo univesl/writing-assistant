@@ -12,10 +12,42 @@ import { $createHeadingNode, HeadingNode } from '@lexical/rich-text'
 
 import {
   captureSelectionContext,
+  createPreparedSelectionStore,
   insertPlainTextSelectionReplacement,
   selectionTextsMatch,
   shouldUsePlainTextInsertion,
 } from './selectionContext.js'
+
+const preparedSelectionStore = createPreparedSelectionStore()
+let captureCount = 0
+const frozenSelection = { selectedMarkdown: '用户实际选中的内容' }
+preparedSelectionStore.prepare(() => {
+  captureCount += 1
+  return frozenSelection
+})
+assert.equal(
+  preparedSelectionStore.consume(() => {
+    captureCount += 1
+    return null
+  }),
+  frozenSelection,
+  'click 必须消费 pointerdown 冻结的选区，不能在焦点变化后重新捕获',
+)
+assert.equal(captureCount, 1)
+
+preparedSelectionStore.prepare(() => null)
+assert.equal(
+  preparedSelectionStore.consume(() => frozenSelection),
+  null,
+  'pointerdown 已明确捕获失败时，click 不能误用另一个缓存选区',
+)
+
+preparedSelectionStore.clear()
+assert.equal(
+  preparedSelectionStore.consume(() => frozenSelection),
+  frozenSelection,
+  '键盘 click 没有 pointerdown 时应当执行一次即时捕获',
+)
 
 function paragraph(text) {
   return $createParagraphNode().append($createTextNode(text))

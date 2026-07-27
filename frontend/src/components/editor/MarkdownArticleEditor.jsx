@@ -31,6 +31,7 @@ import {
 import { useMemo } from 'react'
 import {
   captureSelectionContext,
+  createPreparedSelectionStore,
   insertPlainTextSelectionReplacement,
   selectionTextsMatch,
   shouldUsePlainTextInsertion,
@@ -200,7 +201,23 @@ const aiSelectionBridgePlugin = realmPlugin({
   },
 })
 
-function AiEditToolbarButton({ onActivate, disabled }) {
+function AiEditToolbarButton({ onPrepare, onActivate, disabled }) {
+  const preparedSelectionStore = useMemo(() => createPreparedSelectionStore(), [])
+
+  const prepareSelection = () => {
+    preparedSelectionStore.prepare(onPrepare)
+  }
+
+  const discardPreparedSelection = () => {
+    preparedSelectionStore.clear()
+  }
+
+  const activatePreparedSelection = () => {
+    // 键盘触发没有 pointerdown；此时仍尝试读取一次当前真实选区。
+    const selected = preparedSelectionStore.consume(onPrepare)
+    onActivate?.(selected)
+  }
+
   return (
     <button
       type="button"
@@ -208,16 +225,21 @@ function AiEditToolbarButton({ onActivate, disabled }) {
       aria-label="AI 修改选中内容"
       className="ai-edit-toolbar-button"
       disabled={disabled}
+      onPointerDown={(event) => {
+        if (!event.isPrimary || event.button !== 0) return
+        event.preventDefault()
+        // pointerdown 的默认聚焦发生前，原生高亮仍然精确对应用户拖选范围。
+        // 这里只冻结快照，不打开对话框，也不触发任何 React 状态更新。
+        prepareSelection()
+      }}
       onMouseDown={(event) => {
         if (event.button !== 0) return
         event.preventDefault()
-        // 必须在按钮取得焦点、浏览器清空原生 Selection 之前冻结选区。
-        onActivate?.()
+        // 兼容没有 Pointer Events 的环境，同时避免 pointerdown 后重复捕获。
+        if (!preparedSelectionStore.hasPrepared()) prepareSelection()
       }}
-      onClick={(event) => {
-        // 键盘触发的 click 没有 mouseDown，detail 为 0；鼠标 click 已在上面处理。
-        if (event.detail === 0) onActivate?.()
-      }}
+      onPointerCancel={discardPreparedSelection}
+      onClick={activatePreparedSelection}
     >
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
         <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z" />
@@ -233,6 +255,7 @@ function MarkdownArticleEditor({
   editorRef,
   markdown,
   onChange,
+  onAiEditPrepare,
   onAiEditRequest,
   selectionBridgeRef,
   interactionLocked = false,
@@ -253,7 +276,11 @@ function MarkdownArticleEditor({
           <Separator />
           <BlockTypeSelect />
           <Separator />
-          <AiEditToolbarButton onActivate={onAiEditRequest} disabled={interactionLocked} />
+          <AiEditToolbarButton
+            onPrepare={onAiEditPrepare}
+            onActivate={onAiEditRequest}
+            disabled={interactionLocked}
+          />
           <Separator />
           <BoldItalicUnderlineToggles />
           <Separator />
@@ -262,7 +289,7 @@ function MarkdownArticleEditor({
       )
     }),
     aiSelectionBridgePlugin({ bridgeRef: selectionBridgeRef }),
-  ], [interactionLocked, onAiEditRequest, selectionBridgeRef])
+  ], [interactionLocked, onAiEditPrepare, onAiEditRequest, selectionBridgeRef])
 
   return (
     <MDXEditor

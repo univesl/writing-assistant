@@ -259,8 +259,12 @@ function EditorSidebar({
     }
   }, [])
 
-  const openAiEditDialogFromToolbar = useCallback(() => {
-    const selected = readSelectedEditorSelection()
+  const openAiEditDialogFromToolbar = useCallback((preparedSelection) => {
+    // 鼠标按下按钮后，浏览器会把焦点移出正文并清空原生高亮。
+    // 优先使用 pointerdown 阶段冻结的选区，不能在 click 阶段重新猜测范围。
+    const selected = preparedSelection === undefined
+      ? readSelectedEditorSelection()
+      : preparedSelection
     if (selected?.error) {
       setShowAIDialog(false)
       setAiEditError('')
@@ -489,7 +493,9 @@ function EditorSidebar({
           } : undefined}
         >
           {aiEditNotice && (
-            <div className="ai-edit-notice">{aiEditNotice}</div>
+            <div className="ai-edit-notice" role="alert" aria-live="assertive">
+              {aiEditNotice}
+            </div>
           )}
 
           <MarkdownArticleEditor
@@ -497,6 +503,7 @@ function EditorSidebar({
             editorRef={mdxEditorRef}
             markdown={editorContent}
             onChange={handleMarkdownChange}
+            onAiEditPrepare={readSelectedEditorSelection}
             onAiEditRequest={openAiEditDialogFromToolbar}
             selectionBridgeRef={selectionBridgeRef}
             interactionLocked={isAiEditing}
