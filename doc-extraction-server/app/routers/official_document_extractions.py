@@ -28,7 +28,12 @@ def list_available_models():
     ]
 
 
-@router.post("/extractions", response_model=DocumentExtractionOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/extractions",
+    response_model=DocumentExtractionOut,
+    response_model_exclude_none=True,
+    status_code=status.HTTP_201_CREATED,
+)
 def create_document_extraction(request: DocumentExtractionIn):
     try:
         return extract_from_base64(

@@ -1,208 +1,137 @@
 import os
 import time
-import zipfile
-import requests
-import subprocess
-from typing import Optional
 from pathlib import Path
+from typing import Optional
+
+import requests
 from dotenv import load_dotenv
 
 
 load_dotenv()
 
-MINERU_API_TOKEN = os.getenv("MINERU_API_TOKEN", "")
+
+DEFAULT_MINERU_API_URL = "https://37cb31.xhang.buaa.edu.cn:52811"
+MINERU_API_URL = os.getenv("MINERU_API_URL", DEFAULT_MINERU_API_URL).strip().rstrip("/")
+MINERU_VLM_URL = os.getenv("MINERU_VLM_URL", MINERU_API_URL).strip().rstrip("/")
+MINERU_REQUEST_TIMEOUT = float(os.getenv("MINERU_REQUEST_TIMEOUT", "60"))
+MINERU_PARSE_TIMEOUT = float(os.getenv("MINERU_PARSE_TIMEOUT", "600"))
+MINERU_POLL_INTERVAL = float(os.getenv("MINERU_POLL_INTERVAL", "2"))
+
 
 class MinerUService:
-    def __init__(self, api_token: str = MINERU_API_TOKEN):
-        self.api_token = api_token
-        self.base_url = "https://mineru.net/api/v4"
+    """通过已部署的 MinerU Router 服务将 PDF 解析为 Markdown。"""
+
+    def __init__(
+        self,
+        api_url: str = MINERU_API_URL,
+        vlm_url: str = MINERU_VLM_URL,
+        request_timeout: float = MINERU_REQUEST_TIMEOUT,
+        parse_timeout: float = MINERU_PARSE_TIMEOUT,
+        poll_interval: float = MINERU_POLL_INTERVAL,
+    ):
+        # 当前部署的 API/VLM 地址相同；优先使用专门的 VLM 地址，保留两个
+        # 环境变量是为了兼容后续把路由层和 VLM 层拆分部署的场景。
+        self.api_url = api_url.rstrip("/")
+        self.vlm_url = (vlm_url or api_url).rstrip("/")
+        self.base_url = self.vlm_url
+        self.request_timeout = request_timeout
+        self.parse_timeout = parse_timeout
+        self.poll_interval = poll_interval
 
     def parse_pdf_to_markdown(self, pdf_path: str) -> Optional[str]:
-        """解析PDF文件为Markdown内容
+        """提交 PDF 解析任务并返回 Markdown；失败时返回 ``None``。"""
+        file_path = Path(pdf_path)
 
-        Args:
-            pdf_path: PDF文件路径
-
-        Returns:
-            Markdown内容字符串，失败返回None
-        """
         try:
-            file_name = os.path.basename(pdf_path)
-
-            upload_info = self._get_upload_urls([file_name])
-            if not upload_info:
-                print(f"[MinerU] 获取上传URL失败: {file_name}")
+            task_id = self._submit_task(file_path)
+            if not task_id:
                 return None
 
-            batch_id = upload_info["batch_id"]
-            upload_urls = upload_info["file_urls"]
-
-            upload_success = self._upload_file(pdf_path, upload_urls[0])
-            if not upload_success:
-                print(f"[MinerU] 上传失败: {file_name}")
+            if not self._wait_for_completion(task_id):
                 return None
 
-            result = self._wait_for_completion(batch_id)
-            if not result:
-                print(f"[MinerU] 解析失败或超时: {file_name}")
+            markdown_content = self._get_markdown_result(task_id, file_path.stem)
+            if not markdown_content:
+                print(f"[MinerU] 结果中没有 Markdown: {file_path.name}")
                 return None
 
-            markdown_content = self._extract_markdown(result)
-            if markdown_content:
-                print(f"[MinerU] 解析成功: {file_name}")
+            print(f"[MinerU] 解析成功: {file_path.name}")
             return markdown_content
-
-        except Exception as e:
-            print(f"[MinerU] 解析异常: {e}")
+        except Exception as exc:
+            print(f"[MinerU] 解析异常: {type(exc).__name__}: {exc}")
             return None
 
-    def _get_upload_urls(self, file_names: list) -> Optional[dict]:
-        url = f"{self.base_url}/file-urls/batch"
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_token}"
-        }
+    def _submit_task(self, file_path: Path) -> Optional[str]:
+        url = f"{self.base_url}/tasks"
 
-        files_data = []
-        for file_name in file_names:
-            files_data.append({
-                "name": file_name,
-                "data_id": file_name.split('.')[0]
-            })
+        with file_path.open("rb") as file_obj:
+            response = requests.post(
+                url,
+                files={
+                    "files": (
+                        file_path.name,
+                        file_obj,
+                        "application/pdf",
+                    )
+                },
+                timeout=self.request_timeout,
+            )
 
-        data = {"files": files_data, "model_version": "vlm"}
+        response.raise_for_status()
+        result = response.json()
+        task_id = result.get("task_id")
 
-        try:
-            response = requests.post(url, headers=headers, json=data, timeout=30)
-            if response.status_code == 200:
-                result = response.json()
-                if result.get("code") == 0:
-                    return {
-                        "batch_id": result["data"]["batch_id"],
-                        "file_urls": result["data"]["file_urls"]
-                    }
-                else:
-                    print(f"[MinerU] 获取URL失败: {result.get('msg', '未知错误')}")
-            return None
-        except Exception as e:
-            print(f"[MinerU] 获取URL异常: {e}")
+        if not task_id:
+            print(f"[MinerU] 提交任务失败，响应中没有 task_id: {file_path.name}")
             return None
 
-    def _upload_file(self, file_path: str, upload_url: str) -> bool:
-        try:
-            with open(file_path, 'rb') as f:
-                response = requests.put(upload_url, data=f, timeout=120)
-                return response.status_code == 200
-        except Exception as e:
-            print(f"[MinerU] 上传异常: {e}")
-            return False
+        print(f"[MinerU] 任务已提交: {file_path.name}, task_id={task_id}")
+        return task_id
 
-    def _wait_for_completion(self, batch_id: str, check_interval: int = 10, timeout: int = 600) -> Optional[dict]:
-        start_time = time.time()
+    def _wait_for_completion(self, task_id: str) -> bool:
+        url = f"{self.base_url}/tasks/{task_id}"
+        deadline = time.monotonic() + self.parse_timeout
+        last_status = None
 
-        while time.time() - start_time < timeout:
-            status = self._get_batch_status(batch_id)
-            if status is None:
-                return None
+        while time.monotonic() < deadline:
+            response = requests.get(url, timeout=self.request_timeout)
+            response.raise_for_status()
+            result = response.json()
+            status = str(result.get("status", "")).lower()
 
-            extract_result = status.get("extract_result", [])
-            if not extract_result:
-                time.sleep(check_interval)
-                continue
+            if status != last_status:
+                print(f"[MinerU] 当前状态: {status or 'unknown'}, task_id={task_id}")
+                last_status = status
 
-            states = [item.get("state", "") for item in extract_result]
-            overall_state = states[0] if states else ""
-            print(f"[MinerU] 当前状态: {overall_state}")
+            if status in {"completed", "done", "success", "succeeded"}:
+                return True
 
-            if overall_state in ["done", "completed"]:
-                return status
-            elif overall_state == "failed":
-                return None
-            else:
-                time.sleep(check_interval)
+            if status in {"failed", "error", "cancelled", "canceled"}:
+                error = result.get("error") or result.get("detail") or "未知错误"
+                print(f"[MinerU] 任务失败: {error}, task_id={task_id}")
+                return False
 
-        return None
+            time.sleep(self.poll_interval)
 
-    def _get_batch_status(self, batch_id: str) -> Optional[dict]:
-        url = f"{self.base_url}/extract-results/batch/{batch_id}"
-        headers = {"Authorization": f"Bearer {self.api_token}"}
-
-        try:
-            response = requests.get(url, headers=headers, timeout=30)
-            if response.status_code == 200:
-                result = response.json()
-                if result.get("code") == 0:
-                    return result["data"]
-            return None
-        except Exception as e:
-            print(f"[MinerU] 获取状态异常: {e}")
-            return None
-
-    def _extract_markdown(self, result: dict) -> Optional[str]:
-        extract_result = result.get("extract_result", [])
-        if not extract_result:
-            return None
-
-        for item in extract_result:
-            zip_url = item.get("full_zip_url")
-            if zip_url:
-                import tempfile
-                with tempfile.TemporaryDirectory() as temp_dir:
-                    zip_path = Path(temp_dir) / "result.zip"
-
-                    if self._download_with_retry(zip_url, zip_path):
-                        try:
-                            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                                zip_ref.extractall(temp_dir)
-
-                            md_files = list(Path(temp_dir).glob("*.md"))
-                            if md_files:
-                                with open(md_files[0], 'r', encoding='utf-8') as f:
-                                    return f.read()
-
-                            nested_md = list(Path(temp_dir).rglob("*.md"))
-                            if nested_md:
-                                with open(nested_md[0], 'r', encoding='utf-8') as f:
-                                    return f.read()
-                        except Exception as e:
-                            print(f"[MinerU] 解压异常: {e}")
-
-        return None
-
-    def _download_with_retry(self, url: str, output_path: Path, max_retries: int = 3) -> bool:
-        for attempt in range(max_retries):
-            try:
-                response = requests.get(url, timeout=180)
-                if response.status_code == 200:
-                    with open(output_path, 'wb') as f:
-                        f.write(response.content)
-                    return True
-            except Exception as e:
-                if "cdn-mineru.openxlab.org.cn" in url:
-                    try:
-                        response = requests.get(url, timeout=180, verify=False)
-                        if response.status_code == 200:
-                            with open(output_path, 'wb') as f:
-                                f.write(response.content)
-                            return True
-                    except Exception:
-                        pass
-                    try:
-                        curl_cmd = [
-                            "curl.exe", "-k", "-L", "--silent", "--show-error",
-                            "--connect-timeout", "30", "--max-time", "180",
-                            "-o", str(output_path), url
-                        ]
-                        curl_result = subprocess.run(curl_cmd, check=False, capture_output=True, text=True)
-                        if curl_result.returncode == 0 and output_path.exists() and output_path.stat().st_size > 0:
-                            return True
-                    except Exception:
-                        pass
-
-            if attempt < max_retries - 1:
-                time.sleep(5)
-
+        print(f"[MinerU] 解析超时: task_id={task_id}")
         return False
+
+    def _get_markdown_result(self, task_id: str, file_stem: str) -> Optional[str]:
+        url = f"{self.base_url}/tasks/{task_id}/result"
+        response = requests.get(url, timeout=self.request_timeout)
+        response.raise_for_status()
+        result = response.json()
+        results = result.get("results") or {}
+
+        file_result = results.get(file_stem)
+        if file_result is None and len(results) == 1:
+            file_result = next(iter(results.values()))
+
+        if not isinstance(file_result, dict):
+            return None
+
+        markdown_content = file_result.get("md_content")
+        return markdown_content if isinstance(markdown_content, str) else None
 
 
 mineru_service = MinerUService()

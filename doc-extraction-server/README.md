@@ -189,6 +189,7 @@ print(resp.json())
 - 大文件建议不超过 50MB（Base64 编码后约膨胀 37%）
 - curl 加上 `--max-time 300` 防止超时
 - 字段提取依赖 LLM API（`model.ic.h3i.buaa.edu.cn`），需要该服务可访问
-- PDF 解析依赖 MinerU 云端 API（`mineru.net`），需要 Token 有效
+- PDF 解析使用已部署的 MinerU Router 服务，默认地址为 `https://37cb31.xhang.buaa.edu.cn:52811`
+- 可通过 `MINERU_API_URL` 和 `MINERU_VLM_URL` 覆盖 MinerU 地址；服务内部使用 `/tasks` 异步提交、轮询并读取 Markdown 结果
 - 部署时确保 8050 端口未被占用：`ss -tlnp | grep 8050`
 - 如使用 p2p-proxy 对外暴露，需确保 p2p-proxy 服务端已配置好对应的 clientId 和 machineCode
