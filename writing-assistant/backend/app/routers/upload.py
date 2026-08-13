@@ -14,6 +14,7 @@ from ..models import Session as SessionModel, SessionFile
 from ..schemas import FileUploadResponse, FileListResponse
 from ..utils import ok, err, dt_str
 from ..services.document_processor import (
+    SESSION_FILES_ROOT,
     save_uploaded_file,
     parse_document,
     extract_fields_from_content,
@@ -62,7 +63,7 @@ async def upload_session_file(
         
         # 保存文件到会话目录
         file_path = save_uploaded_file(session_id, file.filename, content)
-        relative_path = str(Path(file_path).relative_to(Path("/home/liubin/writing-assistant/session_files")))
+        relative_path = str(Path(file_path).relative_to(SESSION_FILES_ROOT))
         
         # 创建数据库记录
         session_file = SessionFile(
@@ -268,7 +269,6 @@ def delete_file(file_id: int, db: OrmSession = Depends(get_db)):
     
     try:
         # 删除物理文件
-        from ..services.document_processor import SESSION_FILES_ROOT
         file_path = SESSION_FILES_ROOT / file.storage_path
         if file_path.exists():
             file_path.unlink()

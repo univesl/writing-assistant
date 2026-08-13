@@ -25,6 +25,8 @@ venv/
 .env.*.local
 writing_assistant.db
 *.db
+*.db-shm
+*.db-wal
 session_files/
 upload/
 data/
