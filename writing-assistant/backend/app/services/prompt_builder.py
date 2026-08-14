@@ -114,9 +114,20 @@ _LENGTH_MAX_RE = re.compile(r"(?:不超过|至多|控制在)\s*(\d{2,5})\s*(?:�
 _LENGTH_MIN_RE = re.compile(r"(?:不少于|至少)\s*(\d{2,5})\s*(?:个)?字")
 _DURATION_RE = re.compile(r"(?<!\d)(\d+(?:\.\d+)?)\s*分钟")
 
+# 用户未提字数时按文体惯例控制的默认区间（依据语料统计，可调参）
+DEFAULT_LENGTH_BANDS = {
+    "notice": (600, 1500),
+    "regulation": (2500, 4000),
+    "speech": (1500, 2500),
+    "general": None,
+}
 
-def _build_length_instruction(requirements: str) -> str:
-    """把自由文本中的篇幅要求换成模型更容易执行的正文边界。"""
+
+def _build_length_instruction(requirements: str, style: str = "general") -> str:
+    """把篇幅要求换成模型更容易执行的正文边界。
+
+    用户明确提到字数时，生成硬性范围；未提字数时按文体惯例给出默认区间。
+    """
     text = _as_text(requirements)
 
     range_match = _LENGTH_RANGE_RE.search(text)
@@ -124,8 +135,9 @@ def _build_length_instruction(requirements: str) -> str:
         lower, upper = sorted((int(range_match.group(1)), int(range_match.group(2))))
         return (
             "【本次篇幅目标】\n"
-            f"ARTICLE 正文（不含标记和摘要）尽量控制在 {lower}—{upper} 个中文字符。"
-            "写作前按已有信息模块分配篇幅，只展开一次；不得把字数理解为 token 数，也不得重复栏目或新增业务事实凑字数。"
+            f"ARTICLE 正文必须控制在 {lower}—{upper} 个中文字符之间（不含标记和摘要）。"
+            "写作前按已有信息模块分配篇幅，接近上限时提前收尾；不得超出上限，"
+            "也不得为凑字数重复内容或新增业务事实。"
         )
 
     maximum_match = _LENGTH_MAX_RE.search(text)
@@ -133,8 +145,8 @@ def _build_length_instruction(requirements: str) -> str:
         upper = int(maximum_match.group(1))
         return (
             "【本次篇幅目标】\n"
-            f"ARTICLE 正文不得超过约 {upper} 个中文字符（不含标记和摘要）。"
-            "在事实完整的前提下简洁收束，篇幅上限不授权新增事实。"
+            f"ARTICLE 正文不得超过 {upper} 个中文字符（不含标记和摘要）。"
+            "接近上限时提前收尾，不得超出；也不得为控制字数删减用户要求覆盖的事项。"
         )
 
     minimum_match = _LENGTH_MIN_RE.search(text)
@@ -143,7 +155,7 @@ def _build_length_instruction(requirements: str) -> str:
         upper = round(lower * 1.2)
         return (
             "【本次篇幅目标】\n"
-            f"ARTICLE 正文目标为 {lower}—{upper} 个中文字符（不含标记和摘要）。"
+            f"ARTICLE 正文不得少于 {lower} 个中文字符（不含标记和摘要），目标 {lower}—{upper} 字。"
             "通过完整使用已有内容、阐释已知关系和合理分段达到目标，不得新增业务事实。"
         )
 
@@ -154,9 +166,9 @@ def _build_length_instruction(requirements: str) -> str:
         upper = round(target * 1.15)
         return (
             "【本次篇幅目标】\n"
-            f"用户要求约 {target} 字；ARTICLE 正文尽量控制在 {lower}—{upper} 个中文字符"
-            "（不含标记和摘要）。写作前按已有信息模块分配篇幅并只展开一次；"
-            "不得把字数理解为 token 数，不得重复同一事实或新增业务事实。"
+            f"用户要求约 {target} 字；ARTICLE 正文必须控制在 {lower}—{upper} 个中文字符"
+            "（不含标记和摘要）。写作前按已有信息模块分配篇幅并只展开一次，接近上限时提前收尾；"
+            "不得超出上限，也不得重复同一事实或新增业务事实凑字数。"
         )
 
     duration_match = _DURATION_RE.search(text)
@@ -166,8 +178,19 @@ def _build_length_instruction(requirements: str) -> str:
         upper = round(minutes * 280)
         return (
             "【本次篇幅目标】\n"
-            f"用户要求约 {minutes:g} 分钟；按每分钟约 220—280 个中文字符，ARTICLE 正文目标为"
-            f" {lower}—{upper} 个中文字符（不含标记和摘要）。用完整阐释、现场过渡和自然收束达到朗读长度，不新增业务事实。"
+            f"用户要求约 {minutes:g} 分钟；按每分钟约 220—280 个中文字符，ARTICLE 正文"
+            f"必须控制在 {lower}—{upper} 个中文字符（不含标记和摘要）。"
+            "用完整阐释、现场过渡和自然收束达到朗读长度，接近上限时提前收尾，不新增业务事实。"
+        )
+
+    band = DEFAULT_LENGTH_BANDS.get(style)
+    if band:
+        lower, upper = band
+        return (
+            "【本次篇幅目标】\n"
+            f"用户未指定字数。按{STYLE_CARDS[style]['name']}惯例，ARTICLE 正文应控制在"
+            f"约 {lower}—{upper} 个中文字符（不含标记和摘要）。内容完整优先，"
+            "接近上限时收尾，不得为凑篇幅重复或新增业务事实。"
         )
 
     return ""
@@ -630,7 +653,8 @@ def build_prompt(
         selected_style = style if style in VALID_STYLES else "general"
         generation_style = selected_style if mode == "quick" else "general"
         length_instruction = _build_length_instruction(
-            _as_text(prompt_data.get("user_requirements"))
+            _as_text(prompt_data.get("user_requirements")),
+            generation_style,
         )
         return [
             {

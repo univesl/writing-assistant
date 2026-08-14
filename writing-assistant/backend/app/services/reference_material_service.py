@@ -70,13 +70,30 @@ async def _parse_saved_file(
     }
 
 
-async def parse_reference_uploads(files: Sequence[UploadFile]) -> List[Dict[str, Any]]:
-    """Parse every upload and remove all raw files before returning."""
+async def parse_reference_uploads(
+    files: Sequence[UploadFile],
+    progress: Any = None,
+) -> List[Dict[str, Any]]:
+    """Parse every upload and remove all raw files before returning.
+
+    progress: 可选 async 回调，每份文件解析完成时收到
+        {"type": "parse", "index": i, "total": n, "filename": name}
+    """
     uploads = list(files)
     if not uploads:
         raise ReferenceMaterialError("请至少上传一份参考文件")
     if len(uploads) > REFERENCE_MAX_FILES:
         raise ReferenceMaterialError(f"参考文件数量超过限制，最多允许 {REFERENCE_MAX_FILES} 份")
+
+    async def report(index: int, total: int, filename: str):
+        if not progress:
+            return
+        try:
+            await progress(
+                {"type": "parse", "index": index, "total": total, "filename": filename}
+            )
+        except Exception:
+            pass
 
     try:
         with tempfile.TemporaryDirectory(prefix="wa-reference-") as temp_dir:
@@ -95,10 +112,19 @@ async def parse_reference_uploads(files: Sequence[UploadFile]) -> List[Dict[str,
                 file_bytes, total_bytes = await _copy_upload(upload, path, total_bytes)
                 saved_files.append((index, filename, path, file_bytes))
 
+            total = len(saved_files)
             semaphore = asyncio.Semaphore(REFERENCE_PARSE_CONCURRENCY)
+
+            async def parse_one(index, filename, path, size_bytes):
+                content = await _parse_saved_file(
+                    index, filename, path, size_bytes, semaphore
+                )
+                await report(index, total, filename)
+                return content
+
             results = await asyncio.gather(
                 *[
-                    _parse_saved_file(index, filename, path, size_bytes, semaphore)
+                    parse_one(index, filename, path, size_bytes)
                     for index, filename, path, size_bytes in saved_files
                 ],
                 return_exceptions=True,

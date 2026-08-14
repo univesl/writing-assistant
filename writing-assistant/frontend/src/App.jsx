@@ -519,7 +519,6 @@ function App() {
             llm_model: 'qwen',
             use_rag: useRag || false,
           },
-          timeoutMs: 120000,
           fallbackSummary: '已生成文章',
           onArticle: (liveArticle) => {
             if (generationSessionId === currentSessionIdRef.current) {
@@ -572,14 +571,16 @@ function App() {
         formData.append('use_knowledge_base', String(useRag || false))
         formData.append('top_k', '3')
 
-        updateSessionTaskMessage(
-          generationSessionId,
-          operationId,
-          '参考材料解析完成，正在生成正文…',
-        )
         const fullContent = await streamReferenceWriteFiles({
           formData,
-          timeoutMs: 120000,
+          onParseProgress: (event) => {
+            if (generationSessionId !== currentSessionIdRef.current || !event || event.heartbeat) return
+            updateSessionTaskMessage(
+              generationSessionId,
+              operationId,
+              `正在解析参考材料（第 ${event.index}/${event.total} 份）…`,
+            )
+          },
           onArticle: (liveArticle) => {
             if (generationSessionId !== currentSessionIdRef.current) return
 

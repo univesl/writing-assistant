@@ -312,6 +312,9 @@ export function appendSseChunk(
       if (data.rag) {
         nextMetadata = { ...nextMetadata, rag: data.rag }
       }
+      if (data.finish) {
+        nextMetadata = { ...nextMetadata, finish: true }
+      }
     } catch (error) {
       console.error('Parse error:', error)
     }
