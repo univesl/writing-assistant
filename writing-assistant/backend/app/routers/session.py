@@ -6,7 +6,6 @@ from ..database import get_db
 from ..models import Session as SessionModel
 from ..schemas import SessionCreateIn, SessionRenameIn
 from ..utils import ok, err, dt_str
-from ..services.document_processor import delete_session_files
 
 router = APIRouter(prefix="/session", tags=["session"])
 
@@ -63,7 +62,6 @@ def delete_session(session_id: int, db: OrmSession = Depends(get_db)):
     
     # 删除会话的所有文件（物理文件和数据库记录）
     # 数据库记录会通过 cascade 自动删除
-    delete_session_files(session_id)
     
     db.delete(s)
     db.commit()

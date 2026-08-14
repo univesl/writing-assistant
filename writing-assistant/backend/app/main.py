@@ -12,7 +12,6 @@ from .database import Base, engine
 from .routers import session as session_router
 from .routers import write as write_router
 from .routers import content as content_router
-from .routers import upload as upload_router
 from .routers import generate as generate_router
 from .routers import templates as templates_router
 from .utils import err, ok, dt_str
@@ -55,7 +54,6 @@ app.add_middleware(
 app.include_router(session_router.router, prefix="/api")
 app.include_router(write_router.router, prefix="/api")
 app.include_router(content_router.router, prefix="/api")
-app.include_router(upload_router.router, prefix="/api")
 app.include_router(generate_router.router, prefix="/api")
 app.include_router(templates_router.router, prefix="/api")
 
