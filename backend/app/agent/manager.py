@@ -17,7 +17,7 @@ from ..database import SessionLocal
 from ..models import AgentEvent, AgentRun, Content, DocumentRevision, Session, SessionFile
 from ..services.reference_material_service import REFERENCE_MAX_FILES, REFERENCE_MAX_PARSED_CHARS
 from .graph import AgentCancelled, AgentExecutionContext, build_writing_graph
-from .model_registry import get_model_registry
+from .model_registry import ChatModelAdapter, get_model_registry
 from .schemas import AgentEventView, AgentRunView, CreateAgentRunRequest
 from .skill_registry import get_skill_registry
 

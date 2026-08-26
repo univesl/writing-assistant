@@ -14,7 +14,7 @@ from .document_processor import (
 )
 
 
-UPLOAD_DIR = Path("/home/liubin/writing-assistant/upload")
+UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "./upload"))
 GUARD_API_URL = os.getenv("GUARD_API_URL", "https://07b503.xhang.buaa.edu.cn:52811/guard")
 GUARD_API_TIMEOUT = float(os.getenv("GUARD_API_TIMEOUT", "30"))
 
