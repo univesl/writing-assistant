@@ -7,6 +7,11 @@ import EditorToc from './editor/EditorToc'
 import MarkdownArticleEditor from './editor/MarkdownArticleEditor'
 import TemplateExportControls from './editor/TemplateExportControls'
 import { cleanHeadingText, normalizeMarkdownStructure } from '../utils/markdownEditor'
+import {
+  replaceUniqueTextFragment,
+  sameArticleSnapshot,
+} from '../utils/selectionReplacement'
+import { normalizeOfficialArticleFormat } from '../utils/generatedOutput'
 
 const AI_DIALOG_WIDTH = 380
 const AI_DIALOG_FALLBACK_HEIGHT = 220
@@ -25,12 +30,14 @@ function EditorSidebar({
   onEditorContentChange,
   chatHistory = [],
   onChatHistoryUpdate,
+  isBusy = false,
+  onTaskStart,
+  onTaskFinish,
+  isSessionActive,
+  onAgentSelectionMessage,
 }) {
   const [editorContent, setEditorContent] = useState('')
   const [isSaving, setIsSaving] = useState(false)
-  const [isChecking, setIsChecking] = useState(false)
-  const [guardResult, setGuardResult] = useState(null)
-  const [showGuardResult, setShowGuardResult] = useState(false)
   const [tableOfContents, setTableOfContents] = useState([])
 
   const [showAIDialog, setShowAIDialog] = useState(false)
@@ -160,11 +167,11 @@ function EditorSidebar({
 
   useEffect(() => {
     setTableOfContents(generateTableOfContents(editorContent))
-    onEditorContentChange?.(editorContent)
-  }, [editorContent, generateTableOfContents, onEditorContentChange])
+    onEditorContentChange?.(currentSession?.id, editorContent)
+  }, [currentSession?.id, editorContent, generateTableOfContents, onEditorContentChange])
 
   const handleSave = async () => {
-    if (!currentSession) return
+    if (!currentSession || isBusy) return
 
     const markdown = getCurrentMarkdown()
     if (markdown === currentOutput) return
@@ -179,43 +186,6 @@ function EditorSidebar({
     } finally {
       setIsSaving(false)
     }
-  }
-
-  const handleGuardCheck = async () => {
-    const markdown = getCurrentMarkdown()
-    if (!markdown) return
-
-    setIsChecking(true)
-    setShowGuardResult(true)
-    try {
-      const response = await fetch('/api/content/guard', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: markdown }),
-      })
-      const result = await response.json()
-      setGuardResult(result.code === 200 ? result.data : {
-        harmful: 'error',
-        harmful_type_label: '审查失败',
-        harmful_reason: result.msg || '审查服务异常',
-        confidence_label: '-',
-      })
-    } catch (error) {
-      console.error('内容审查失败:', error)
-      setGuardResult({
-        harmful: 'error',
-        harmful_type_label: '审查失败',
-        harmful_reason: error.message || '网络错误',
-        confidence_label: '-',
-      })
-    } finally {
-      setIsChecking(false)
-    }
-  }
-
-  const handleCloseGuardResult = () => {
-    setShowGuardResult(false)
-    setGuardResult(null)
   }
 
   const showAiEditNotice = useCallback((message) => {
@@ -315,7 +285,7 @@ function EditorSidebar({
   }
 
   const handleAiEdit = async () => {
-    if (!currentSession) return
+    if (!currentSession || isBusy) return
     if (!selectedMarkdown.trim()) {
       setAiEditError('请先在正文中选择需要修改的内容')
       return
@@ -330,6 +300,33 @@ function EditorSidebar({
       role: 'user',
       content: userMessage,
     }]
+
+    if (onAgentSelectionMessage) {
+      setIsAiEditing(true)
+      setAiEditError('')
+      try {
+        await onAgentSelectionMessage({
+          instruction,
+          selectedMarkdown,
+          selectionContext,
+          baseArticle: articleContent,
+        })
+        resetAiEditDialog()
+      } catch (error) {
+        setAiEditError(error.message || '无法创建选区修改任务')
+      } finally {
+        setIsAiEditing(false)
+      }
+      return
+    }
+
+    const operationId = onTaskStart
+      ? onTaskStart(editSessionId, 'selection-edit', '正在根据上下文修改选区，请稍候…')
+      : `local-${Date.now()}`
+    if (!operationId) {
+      setAiEditError('该会话已有正文任务运行，请完成后再试')
+      return
+    }
 
     setIsAiEditing(true)
     setAiEditError('')
@@ -350,45 +347,79 @@ function EditorSidebar({
         },
       })
 
-      if (editSessionId !== currentSessionIdRef.current) {
-        throw new Error('会话已切换，本次修改未应用；请在目标会话中重新选择内容')
-      }
-      if (getCurrentMarkdown() !== articleContent) {
-        throw new Error('等待期间文章内容已变化，本次修改未应用；请重新选择最新内容')
-      }
-
+      const sessionIsActive = () => (
+        isSessionActive
+          ? isSessionActive(editSessionId)
+          : editSessionId === currentSessionIdRef.current
+      )
+      const replacementIsNoop = replacementMarkdown === selectedMarkdown.trim()
       let updatedArticle = articleContent
-      if (replacementMarkdown !== selectedMarkdown.trim()) {
-        const editorChange = waitForNextEditorChange()
-        try {
-          const selectionBridge = selectionBridgeRef.current
-          if (!selectionBridge?.apply) {
-            throw new Error('编辑器选区不可用，请重新选择需要修改的内容')
-          }
-          selectionBridge.apply(replacementMarkdown)
-        } catch (error) {
-          discardPendingEditorChange()
-          throw error
+
+      if (sessionIsActive() && selectionBridgeRef.current?.apply) {
+        if (getCurrentMarkdown() !== articleContent) {
+          throw new Error('等待期间文章内容已变化，本次修改未应用；请重新选择最新内容')
         }
-        updatedArticle = await editorChange
+
+        if (!replacementIsNoop) {
+          const editorChange = waitForNextEditorChange()
+          try {
+            selectionBridgeRef.current.apply(replacementMarkdown)
+          } catch (error) {
+            discardPendingEditorChange()
+            throw error
+          }
+          updatedArticle = await editorChange
+          selectionApplied = true
+
+          skipExternalSyncRef.current = {
+            sessionId: editSessionId,
+            content: updatedArticle,
+          }
+          await onArticleUpdate?.(editSessionId, updatedArticle, { persist: false })
+
+          try {
+            await writeApi.saveArticle(editSessionId, updatedArticle)
+          } catch {
+            throw new Error('修改已应用，但自动保存失败，请点击“保存”按钮重试')
+          }
+        } else {
+          selectionBridgeRef.current.clear?.()
+        }
+      } else if (!replacementIsNoop) {
+        // 任务属于已切换到后台的会话。此时原 Lexical 编辑器已经卸载，
+        // 不能把结果写进当前会话，也不能凭相似度猜文章位置；重新读取原会话
+        // 的最新快照，并且只允许唯一选区匹配后落盘。
+        const latestArticleResponse = await writeApi.getArticle(editSessionId)
+        const latestArticle = normalizeOfficialArticleFormat(
+          normalizeMarkdownStructure(latestArticleResponse?.article_content || ''),
+        )
+        if (!sameArticleSnapshot(latestArticle, articleContent)) {
+          throw new Error('等待期间原会话文章已变化，未应用后台修改；请重新选择最新内容')
+        }
+
+        const backgroundReplacement = replaceUniqueTextFragment(
+          latestArticle,
+          selectedMarkdown,
+          replacementMarkdown,
+        )
+        if (!backgroundReplacement.ok) {
+          throw new Error(backgroundReplacement.reason)
+        }
+
+        updatedArticle = backgroundReplacement.content
+        await writeApi.saveArticle(editSessionId, updatedArticle)
         selectionApplied = true
 
-        skipExternalSyncRef.current = {
-          sessionId: editSessionId,
-          content: updatedArticle,
-        }
-        await onArticleUpdate?.(editSessionId, updatedArticle, { persist: false })
-
-        try {
-          await writeApi.saveArticle(editSessionId, updatedArticle)
-        } catch {
-          throw new Error('修改已应用，但自动保存失败，请点击“保存”按钮重试')
+        // 用户可能在后台请求完成前切回原会话；此时把已经落盘的结果同步到
+        // 当前界面，否则由下一次会话加载兜底。
+        if (sessionIsActive()) {
+          await onArticleUpdate?.(editSessionId, updatedArticle, { persist: false })
         }
       } else {
         selectionBridgeRef.current?.clear?.()
       }
 
-      if (editSessionId === currentSessionIdRef.current) {
+      if (sessionIsActive()) {
         const updatedChatHistory = [...nextChatHistory, {
           role: 'assistant',
           content: summaryContent,
@@ -397,17 +428,22 @@ function EditorSidebar({
       }
 
       saveChatMessage(editSessionId, summaryContent, 'assistant').catch(() => {})
-      resetAiEditDialog()
+      if (sessionIsActive()) resetAiEditDialog()
     } catch (error) {
       console.error('AI 局部修改失败:', error)
       if (selectionApplied) {
-        resetAiEditDialog()
-        showAiEditNotice(error.message || '修改已应用，请手动保存')
+        if (isSessionActive?.(editSessionId) ?? editSessionId === currentSessionIdRef.current) {
+          resetAiEditDialog()
+          showAiEditNotice(error.message || '修改已应用，请手动保存')
+        }
       } else {
-        setAiEditError(error.message || 'AI 修改失败，请重试')
+        if (isSessionActive?.(editSessionId) ?? editSessionId === currentSessionIdRef.current) {
+          setAiEditError(error.message || 'AI 修改失败，请重试')
+        }
       }
     } finally {
       setIsAiEditing(false)
+      onTaskFinish?.(editSessionId, operationId)
     }
   }
 
@@ -457,19 +493,12 @@ function EditorSidebar({
 
       <div className="editor-main">
         <div className="editor-header">
-          <h3>文本编辑器</h3>
+          <strong className="editor-title">正文编辑</strong>
           <div className="editor-actions">
-            <button
-              className="editor-btn guard-btn"
-              onClick={handleGuardCheck}
-              disabled={!editorContent || isChecking}
-            >
-              {isChecking ? '审查中...' : '内容审查'}
-            </button>
             <button
               className="editor-btn save-btn"
               onClick={handleSave}
-              disabled={isSaving}
+              disabled={isSaving || isBusy}
             >
               {isSaving ? '保存中...' : '保存'}
             </button>
@@ -502,76 +531,9 @@ function EditorSidebar({
             onAiEditPrepare={readSelectedEditorSelection}
             onAiEditRequest={openAiEditDialogFromToolbar}
             selectionBridgeRef={selectionBridgeRef}
-            interactionLocked={isAiEditing}
+            interactionLocked={isAiEditing || isBusy}
           />
 
-          {showGuardResult && guardResult && (
-            <div className={`guard-result-panel ${guardResult.harmful === 'false' ? 'passed' : guardResult.harmful === 'true' ? 'failed' : 'error'}`}>
-              <div className="guard-result-header">
-                <span className="guard-result-icon">
-                  {isChecking ? '...' : guardResult.harmful === 'false' ? '✓' : guardResult.harmful === 'true' ? '!' : '×'}
-                </span>
-                <span className="guard-result-title">
-                  {isChecking ? '正在审查...' : guardResult.harmful === 'false' ? '内容审查通过' : guardResult.harmful === 'true' ? '内容审查未通过' : '审查失败'}
-                </span>
-                <button className="guard-result-close" onClick={handleCloseGuardResult}>×</button>
-              </div>
-              {!isChecking && (
-                <div className="guard-result-body">
-                  {guardResult.harmful === 'false' && (
-                    <div className="guard-result-passed">
-                      <p>未发现违规内容</p>
-                      <span className="guard-confidence">置信度：{guardResult.confidence_label}</span>
-                    </div>
-                  )}
-                  {guardResult.harmful === 'true' && (
-                    <div className="guard-result-details">
-                      {guardResult.harmful_type_label && guardResult.harmful_type_label !== '无' && (
-                        <div className="guard-detail-item">
-                          <span className="guard-detail-label">违规类型：</span>
-                          <span className="guard-detail-value">{guardResult.harmful_type_label}</span>
-                        </div>
-                      )}
-                      {guardResult.harmful_degree_label && guardResult.harmful_degree_label !== '无' && (
-                        <div className="guard-detail-item">
-                          <span className="guard-detail-label">违规程度：</span>
-                          <span className="guard-detail-value">{guardResult.harmful_degree_label}</span>
-                        </div>
-                      )}
-                      {guardResult.harmful_reason && (
-                        <div className="guard-detail-item">
-                          <span className="guard-detail-label">违规原因：</span>
-                          <span className="guard-detail-value">{guardResult.harmful_reason}</span>
-                        </div>
-                      )}
-                      {guardResult.harmful_words && (
-                        <div className="guard-detail-item">
-                          <span className="guard-detail-label">违规词汇：</span>
-                          <span className="guard-detail-value harmful-words">{guardResult.harmful_words}</span>
-                        </div>
-                      )}
-                      {guardResult.highlight_spans && guardResult.highlight_spans.length > 0 && (
-                        <div className="guard-detail-item">
-                          <span className="guard-detail-label">高亮片段：</span>
-                          <div className="guard-highlight-spans">
-                            {guardResult.highlight_spans.map((span, i) => (
-                              <span key={i} className="guard-highlight-span">{span}</span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                      <span className="guard-confidence">置信度：{guardResult.confidence_label}</span>
-                    </div>
-                  )}
-                  {guardResult.harmful === 'error' && (
-                    <div className="guard-result-error">
-                      <p>{guardResult.harmful_reason}</p>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
         </div>
 
         <div className="editor-footer">

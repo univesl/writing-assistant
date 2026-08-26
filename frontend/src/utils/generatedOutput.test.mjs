@@ -3,7 +3,12 @@ import assert from 'node:assert/strict'
 import {
   appendKnowledgeSources,
   appendSseChunk,
+  extractArticlePreview,
+  formatReferenceLabel,
+  normalizeOfficialArticleFormat,
+  normalizeKnowledgeSourcesInMessage,
   parseSelectionEditOutput,
+  sortKnowledgeReferences,
 } from './generatedOutput.js'
 
 const encoder = new TextEncoder()
@@ -32,14 +37,87 @@ assert.deepEqual(
 
 assert.equal(
   appendKnowledgeSources('生成完成', ['[1] 来源文件', '[1] 来源文件', '[2] 另一文件']),
-  '生成完成\n\n知识库来源：\n- [1] 来源文件\n- [2] 另一文件',
+  '生成完成\n\n知识库来源：\n- 来源文件\n- 另一文件',
   'knowledge sources should be shown outside the formal article and deduplicated',
+)
+
+assert.deepEqual(
+  sortKnowledgeReferences(['[3] 文件C', '[1] 文件A', '[2] 文件B', '未编号来源']),
+  ['文件A', '文件B', '文件C', '未编号来源'],
+  'knowledge source references should be displayed in ascending citation order',
+)
+
+assert.deepEqual(
+  sortKnowledgeReferences(['- [3] 文件C', '[1] 文件A']),
+  ['文件A', '文件C'],
+  'source sorting should also recognize a reference that already carries a bullet marker',
+)
+
+assert.equal(
+  formatReferenceLabel('[5] buaa_corpus_20260811/现行有效制度/中共北京航空航天大学委员会网络意识形态工作责任制实施细则.pdf'),
+  '中共北京航空航天大学委员会网络意识形态工作责任制实施细则.pdf',
+  'knowledge source paths should display only the filename',
+)
+
+assert.deepEqual(
+  sortKnowledgeReferences([
+    '[5] buaa_corpus_20260811/现行有效制度/同名文件.pdf',
+    '[9] buaa_corpus_20260811\\通知公告\\同名文件.pdf',
+  ]),
+  ['同名文件.pdf'],
+  'different source paths with the same filename should be deduplicated for display',
+)
+
+assert.equal(
+  normalizeKnowledgeSourcesInMessage(
+    '已生成。\n\n知识库来源：\n- [3] 文件C\n- [1] 文件A\n- [2] 文件B',
+  ),
+  '已生成。\n\n知识库来源：\n- 文件A\n- 文件B\n- 文件C',
+  'historical chat messages should also display source numbers in ascending order',
+)
+
+assert.equal(
+  normalizeOfficialArticleFormat(
+    '1. **严格执行网络安全预案**\n   * 各单位应按预案落实相关要求。\n2. **加强信息报送**\n   - 发生事件应及时报告。',
+  ),
+  '1、**严格执行网络安全预案** 各单位应按预案落实相关要求。\n2、**加强信息报送** 发生事件应及时报告。',
+  'Markdown nested bullets should become flat official paragraphs',
+)
+
+assert.equal(
+  normalizeOfficialArticleFormat('1.第一项工作\n2)第二项工作\n1.5不是分点'),
+  '1、第一项工作\n2、第二项工作\n1.5不是分点',
+  'a missing list-marker space should still be normalized without touching decimals',
+)
+
+assert.equal(
+  normalizeOfficialArticleFormat('* 第一项工作。\n* 第二项工作。'),
+  '一、第一项工作。\n二、第二项工作。',
+  'parallel unordered items should use an official flat numbering form',
+)
+
+assert.equal(
+  normalizeOfficialArticleFormat('一、已有正式编号\n\n1、已有阿拉伯编号\n（一）已有分款'),
+  '一、已有正式编号\n\n1、已有阿拉伯编号\n（一）已有分款',
+  'existing official numbering should remain unchanged',
+)
+
+assert.equal(
+  extractArticlePreview('---ARTICLE---\n1. 第一项\n2. 第二项\n---SUMMARY---\n已完成'),
+  '1、第一项\n2、第二项\n',
+  'streaming article previews should not expose Markdown dot numbering',
 )
 
 assert.equal(
   appendKnowledgeSources('生成完成', []),
   '生成完成',
   'an empty source list should not create an empty warning section',
+)
+
+assert.equal(
+  appendKnowledgeSources('已使用上传材料', [{ kind: 'uploaded_file', name: '骨架.docx' }]),
+  '已使用上传材料',
+  'uploaded material objects should not be rendered as knowledge-base object strings',
 )
 
 assert.deepEqual(

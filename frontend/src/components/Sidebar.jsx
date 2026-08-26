@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-function Sidebar({ sessions, currentSession, onSessionChange, onNewSession, onDeleteSession, onRenameSession }) {
+function Sidebar({ sessions, currentSession, onSessionChange, onNewSession, onDeleteSession, onRenameSession, activeRunSessionIds = [] }) {
   const [renameMode, setRenameMode] = useState(null)
   const [renameInput, setRenameInput] = useState('')
 
@@ -66,6 +66,7 @@ function Sidebar({ sessions, currentSession, onSessionChange, onNewSession, onDe
             ) : (
               <div className="session-name">
                 {session.name}
+                {activeRunSessionIds.includes(session.id) && <span className="session-run-dot" title="Agent 正在后台运行" aria-label="Agent 正在后台运行" />}
                 <div className="session-actions">
                   <button 
                     className="action-btn rename-btn"

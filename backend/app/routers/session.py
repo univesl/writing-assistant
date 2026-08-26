@@ -14,7 +14,7 @@ router = APIRouter(prefix="/session", tags=["session"])
 @router.post("/create")
 def create_session(payload: SessionCreateIn, db: OrmSession = Depends(get_db)):
     # 打印前端传入的完整数据
-    print("[DEBUG] 前端传入的会话创建数据:", payload.dict())
+    print("[DEBUG] 前端传入的会话创建数据:", payload.model_dump())
     name = (payload.session_name or "").strip() if payload.session_name else ""
     tmp_name = name if name else "新会话"
     s = SessionModel(session_name=tmp_name)
@@ -73,7 +73,7 @@ def delete_session(session_id: int, db: OrmSession = Depends(get_db)):
 @router.put("/rename/{session_id}")
 def rename_session(session_id: int, payload: SessionRenameIn, db: OrmSession = Depends(get_db)):
     # 打印前端传入的完整数据
-    print(f"[DEBUG] 前端传入的会话重命名数据: session_id={session_id}, {payload.dict()}")
+    print(f"[DEBUG] 前端传入的会话重命名数据: session_id={session_id}, {payload.model_dump()}")
     s = db.get(SessionModel, session_id)
     if not s:
         return err(404, "会话不存在")

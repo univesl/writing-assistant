@@ -1,15 +1,19 @@
 from fastapi import APIRouter, HTTPException, status
 
 from ..schemas import (
+    DocumentFileGuardIn,
+    DocumentFileGuardOut,
     DocumentExtractionIn,
     DocumentExtractionOut,
     ExtractionModelListOut,
 )
 from ..services.document_processor import AVAILABLE_MODELS
 from ..services.official_document_extractor import (
+    DocumentGuardError,
     DocumentParseError,
     UnsupportedFileTypeError,
     extract_from_base64,
+    guard_file_from_base64,
 )
 
 
@@ -36,3 +40,19 @@ def create_document_extraction(request: DocumentExtractionIn):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except DocumentParseError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/file-guard", response_model=DocumentFileGuardOut)
+def guard_document_file(request: DocumentFileGuardIn):
+    """解析 Base64 文件并审查正文，不保存解析内容。"""
+    try:
+        return guard_file_from_base64(
+            filename=request.filename,
+            content_base64=request.content_base64,
+        )
+    except UnsupportedFileTypeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except DocumentParseError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except DocumentGuardError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc

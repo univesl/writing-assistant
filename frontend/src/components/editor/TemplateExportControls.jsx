@@ -10,7 +10,7 @@ function TemplateExportControls({
   onContentSaved,
 }) {
   const [templates, setTemplates] = useState([])
-  const [selectedTemplate, setSelectedTemplate] = useState('')
+  const [selectedTemplateId, setSelectedTemplateId] = useState(null)
   const [showTemplateMenu, setShowTemplateMenu] = useState(false)
   const [showTemplateManager, setShowTemplateManager] = useState(false)
   const [isUploadingTemplate, setIsUploadingTemplate] = useState(false)
@@ -25,7 +25,7 @@ function TemplateExportControls({
         if (json.code === 200 && json.data) {
           setTemplates(json.data)
           const defaultTpl = json.data.find(t => t.is_default)
-          if (defaultTpl) setSelectedTemplate(defaultTpl.filename)
+          if (defaultTpl) setSelectedTemplateId(defaultTpl.template_id)
         }
       } catch (e) {
         console.error('加载模板列表失败:', e)
@@ -94,8 +94,8 @@ function TemplateExportControls({
         onArticleUpdate?.(currentSession.id, markdown, { persist: false })
       }
 
-      const referenceDoc = exportType === 'docx' ? (selectedTemplate || null) : null
-      const response = await writeApi.exportDocument(currentSession.id, exportType, referenceDoc)
+      const templateId = exportType === 'docx' ? selectedTemplateId : null
+      const response = await writeApi.exportDocument(currentSession.id, exportType, templateId)
 
       let blob
       let filename
@@ -186,7 +186,7 @@ function TemplateExportControls({
               <polyline points="14 2 14 8 20 8" />
             </svg>
             <span className="template-select-label">
-              {templates.find(t => t.filename === selectedTemplate)?.name || '默认模板'}
+              {templates.find(t => t.template_id === selectedTemplateId)?.name || '默认模板'}
             </span>
           </button>
           {showTemplateMenu && (
@@ -194,8 +194,8 @@ function TemplateExportControls({
               {templates.map(t => (
                 <div
                   key={t.template_id}
-                  className={`template-dropdown-item ${t.filename === selectedTemplate ? 'active' : ''}`}
-                  onClick={() => { setSelectedTemplate(t.filename); setShowTemplateMenu(false) }}
+                  className={`template-dropdown-item ${t.template_id === selectedTemplateId ? 'active' : ''}`}
+                  onClick={() => { setSelectedTemplateId(t.template_id); setShowTemplateMenu(false) }}
                 >
                   <span className="template-dropdown-name">{t.name}</span>
                   {t.description && <span className="template-dropdown-desc">{t.description}</span>}

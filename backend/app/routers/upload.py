@@ -5,6 +5,7 @@
 """
 
 import json
+import os
 from fastapi import APIRouter, Depends, UploadFile, File, Form
 from sqlalchemy.orm import Session as OrmSession
 from pathlib import Path
@@ -14,6 +15,7 @@ from ..models import Session as SessionModel, SessionFile
 from ..schemas import FileUploadResponse, FileListResponse
 from ..utils import ok, err, dt_str
 from ..services.document_processor import (
+    SESSION_FILES_ROOT,
     save_uploaded_file,
     parse_document,
     extract_fields_from_content,
@@ -24,6 +26,7 @@ from ..services.document_processor import (
 from ..services.field_extractor import AVAILABLE_MODELS
 
 router = APIRouter(prefix="/upload", tags=["upload"])
+REFERENCE_MAX_FILE_BYTES = max(1, int(os.getenv("REFERENCE_MAX_FILE_MB", "20"))) * 1024 * 1024
 
 
 @router.post("/session/{session_id}")
@@ -54,15 +57,18 @@ async def upload_session_file(
     if not is_supported_file(file.filename):
         return err(400, "不支持的文件类型，请上传 PDF、DOCX、MD 或 TXT 文件")
     
+    session_file = None
     try:
         # 读取文件内容
         content = await file.read()
         if len(content) == 0:
             return err(400, "文件内容为空")
+        if len(content) > REFERENCE_MAX_FILE_BYTES:
+            return err(400, f"单个参考文件不能超过 {REFERENCE_MAX_FILE_BYTES // (1024 * 1024)} MB")
         
         # 保存文件到会话目录
         file_path = save_uploaded_file(session_id, file.filename, content)
-        relative_path = str(Path(file_path).relative_to(Path("/home/liubin/writing-assistant/session_files")))
+        relative_path = str(Path(file_path).relative_to(SESSION_FILES_ROOT))
         
         # 创建数据库记录
         session_file = SessionFile(
@@ -115,6 +121,12 @@ async def upload_session_file(
         
         return ok(result, "文件上传成功")
         
+    except UnicodeError as e:
+        if session_file is not None:
+            session_file.status = "failed"
+            session_file.error_message = str(e)
+            db.commit()
+        return err(400, str(e))
     except Exception as e:
         print(f"[ERROR] 文件上传失败: {e}")
         import traceback
@@ -268,7 +280,6 @@ def delete_file(file_id: int, db: OrmSession = Depends(get_db)):
     
     try:
         # 删除物理文件
-        from ..services.document_processor import SESSION_FILES_ROOT
         file_path = SESSION_FILES_ROOT / file.storage_path
         if file_path.exists():
             file_path.unlink()

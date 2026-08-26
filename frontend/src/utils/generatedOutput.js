@@ -1,5 +1,98 @@
 const ARTICLE_MARKER = '---ARTICLE---'
 const SUMMARY_MARKER = '---SUMMARY---'
+// 只在行首识别列表编号；允许模型漏掉编号后的空格，但不把 1.5、2026.08
+// 这类数字写法误当成公文分点。
+const NUMBERED_MARKER_RE = /^\s*(\d{1,2})[.)](?:\s+|(?=[^\d\s]))(.+)$/
+const UNORDERED_MARKER_RE = /^(\s*)([*+-])\s+(.+)$/
+
+function chineseOrdinal(number) {
+  const digits = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九']
+  if (number <= 10) return number === 10 ? '十' : digits[number]
+  if (number < 20) return `十${digits[number - 10]}`
+  if (number % 10 === 0) return `${digits[Math.floor(number / 10)]}十`
+  return `${digits[Math.floor(number / 10)]}十${digits[number % 10]}`
+}
+
+function isBlankLine(line) {
+  return !String(line || '').trim()
+}
+
+function countTopLevelBullets(lines, start) {
+  let count = 0
+  for (let index = start; index < lines.length; index += 1) {
+    const line = lines[index]
+    if (isBlankLine(line)) break
+    const match = line.match(UNORDERED_MARKER_RE)
+    if (!match) {
+      if (/^\s+/.test(line)) continue
+      break
+    }
+    if (match[1].length === 0) count += 1
+  }
+  return count
+}
+
+/**
+ * 把模型偶尔输出的 Markdown 项目符号收敛为公文段落/平级编号。
+ *
+ * 正式公文仍允许“一、”“二、”“1、”以及制度中的“（一）”，因此这里只
+ * 处理 Markdown 的 `*`、`-`、`+` 和 `1.`/`1)`。嵌套无序项并入所属
+ * 段落，不删除任何正文文字，也不触碰加粗语法中的星号。
+ */
+export function normalizeOfficialArticleFormat(article) {
+  if (!article) return ''
+
+  const lines = String(article).replace(/\r\n?/g, '\n').split('\n')
+  const normalized = []
+  let topLevelBulletIndex = 0
+  let inTopLevelBulletBlock = false
+
+  lines.forEach((line, index) => {
+    const numbered = line.match(NUMBERED_MARKER_RE)
+    if (numbered) {
+      topLevelBulletIndex = 0
+      inTopLevelBulletBlock = false
+      normalized.push(`${line.slice(0, line.length - numbered[0].length)}${numbered[1]}、${numbered[2]}`)
+      return
+    }
+
+    const bullet = line.match(UNORDERED_MARKER_RE)
+    if (!bullet) {
+      if (isBlankLine(line)) {
+        topLevelBulletIndex = 0
+        inTopLevelBulletBlock = false
+      }
+      normalized.push(line)
+      return
+    }
+
+    const indent = bullet[1].length
+    const content = bullet[3].trim()
+    if (!content) return
+
+    if (indent > 0 && normalized.length > 0) {
+      // 子项目是对上一段的解释，不再保留一个会被编辑器渲染成圆点的块。
+      const previousIndex = normalized.length - 1
+      const previous = normalized[previousIndex].trimEnd()
+      if (previous && !isBlankLine(previous)) {
+        normalized[previousIndex] = `${previous} ${content}`
+        return
+      }
+    }
+
+    const blockSize = countTopLevelBullets(lines, index)
+    if (indent === 0 && (blockSize > 1 || inTopLevelBulletBlock)) {
+      topLevelBulletIndex += 1
+      inTopLevelBulletBlock = true
+      normalized.push(`${chineseOrdinal(topLevelBulletIndex)}、${content}`)
+    } else {
+      topLevelBulletIndex = inTopLevelBulletBlock ? topLevelBulletIndex + 1 : 0
+      normalized.push(content)
+    }
+  })
+
+  return normalized.join('\n')
+}
 
 export function extractArticlePreview(output) {
   if (!output) return ''
@@ -19,7 +112,9 @@ export function extractArticlePreview(output) {
     articleText = articleText.slice(0, summaryIndex)
   }
 
-  return articleText.trimStart()
+  // 流式预览也经过同一套格式收敛，避免用户在生成尚未结束时先看到圆点列表，
+  // 生成结束后再突然改变版式。
+  return normalizeOfficialArticleFormat(articleText.trimStart())
 }
 
 export function parseGeneratedOutput(output, fallbackSummary = '已生成文章') {
@@ -27,7 +122,9 @@ export function parseGeneratedOutput(output, fallbackSummary = '已生成文章'
   const summaryMatch = output.match(/---SUMMARY---\s*([\s\S]*?)$/)
 
   return {
-    articleContent: (articleMatch ? articleMatch[1] : output).trim(),
+    articleContent: normalizeOfficialArticleFormat(
+      (articleMatch ? articleMatch[1] : output).trim(),
+    ),
     summaryContent: (summaryMatch ? summaryMatch[1] : fallbackSummary).trim() || fallbackSummary,
   }
 }
@@ -136,14 +233,73 @@ export function parseSelectionEditOutput(
   }
 }
 
-export function appendKnowledgeSources(summary, references = []) {
-  const uniqueReferences = [...new Set(
-    references.filter(Boolean).map(reference => String(reference).trim()).filter(Boolean)
-  )]
-  if (uniqueReferences.length === 0) return summary
+export function formatReferenceLabel(reference) {
+  const value = String(reference || '')
+    .trim()
+    .replace(/^[-*+]\s+/, '')
+    .replace(/^\[\d+\]\s*/, '')
+    .trim()
+  if (!value) return ''
 
-  const sourceLines = uniqueReferences.map(reference => `- ${reference}`).join('\n')
+  const pathParts = value.split(/[\\/]+/).filter(Boolean)
+  return pathParts.at(-1)?.trim() || value
+}
+
+export function sortKnowledgeReferences(references = []) {
+  const uniqueReferences = [...new Set(
+    references
+      .filter(reference => typeof reference === 'string')
+      .map(reference => reference.trim())
+      .filter(Boolean)
+  )]
+
+  const sortedReferences = uniqueReferences
+    .map((reference, index) => ({
+      reference,
+      index,
+      number: reference.match(/^\s*(?:[-*+]\s+)?\[(\d+)\]/)?.[1],
+    }))
+    .sort((left, right) => {
+      if (left.number && right.number) {
+        const difference = Number(left.number) - Number(right.number)
+        return difference || left.index - right.index
+      }
+      if (left.number) return -1
+      if (right.number) return 1
+      return left.index - right.index
+    })
+    .map(item => formatReferenceLabel(item.reference))
+    .filter(Boolean)
+
+  return [...new Set(sortedReferences)]
+}
+
+export function appendKnowledgeSources(summary, references = []) {
+  const sortedReferences = sortKnowledgeReferences(references)
+  if (sortedReferences.length === 0) return summary
+
+  const sourceLines = sortedReferences.map(reference => `- ${reference}`).join('\n')
   return `${summary.trim()}\n\n知识库来源：\n${sourceLines}`
+}
+
+/** 重新打开历史会话时，也把已经保存的来源段落按编号整理。 */
+export function normalizeKnowledgeSourcesInMessage(message) {
+  const text = String(message || '')
+  const marker = '知识库来源：'
+  const markerIndex = text.indexOf(marker)
+  if (markerIndex < 0) return message
+
+  const summary = text.slice(0, markerIndex).trim()
+  const sourceLines = text
+    .slice(markerIndex + marker.length)
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean)
+    .map(line => line.replace(/^[-*+]\s+/, '').trim())
+  const sortedReferences = sortKnowledgeReferences(sourceLines)
+  if (sortedReferences.length === 0) return message
+
+  return `${summary}\n\n${marker}\n${sortedReferences.map(reference => `- ${reference}`).join('\n')}`
 }
 
 export function appendSseChunk(

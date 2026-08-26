@@ -1,21 +1,22 @@
-import React, { useState, useRef, useEffect } from 'react'
-import { writeApi } from '../api/writeApi'
-import { streamQuickWrite } from '../services/writeStream'
+import React, { useState, useEffect } from 'react'
+import AgentRunPanel from './AgentRunPanel'
 
-function MainContent({ currentSession, editorContent, chatHistory, onArticleUpdate, onChatHistoryUpdate }) {
-  const [isGenerating, setIsGenerating] = useState(false)
+function MainContent({
+  currentSession,
+  editorContent,
+  chatHistory,
+  isBusy = false,
+  agentRun,
+  agentEvents = [],
+  onAgentCancel,
+  onAgentRetry,
+  onAgentMessage,
+}) {
   const [chatInput, setChatInput] = useState('')
   const [displayChatHistory, setDisplayChatHistory] = useState([])
   const currentSessionId = currentSession?.id || null
-  const currentSessionIdRef = useRef(currentSession?.id || null)
-
-  const getArticleContent = () => {
-    return editorContent || ''
-  }
 
   useEffect(() => {
-    currentSessionIdRef.current = currentSessionId
-
     if (chatHistory && chatHistory.length > 0) {
       setDisplayChatHistory(chatHistory)
     } else {
@@ -24,78 +25,16 @@ function MainContent({ currentSession, editorContent, chatHistory, onArticleUpda
   }, [chatHistory, currentSessionId])
 
   const handleEditSubmit = async () => {
-    if (!currentSession || !chatInput.trim()) {
+    if (!currentSession || isBusy || !chatInput.trim()) {
       return
     }
-
-    const articleContent = getArticleContent()
-    if (!articleContent) {
-      alert('请先生成文章内容，然后再进行修改润色')
-      return
-    }
-
-    setIsGenerating(true)
-    const editSessionId = currentSession.id
 
     try {
-      const userDisplayContent = chatInput
-
-      const newChatHistory = [...displayChatHistory, {
-        role: 'user',
-        content: userDisplayContent
-      }]
-      setDisplayChatHistory(newChatHistory)
-
-      writeApi.saveContent(editSessionId, userDisplayContent, 'quick', 'chat', 'user').catch(() => {})
-
-      const { articleContent: articleResult, summaryContent } = await streamQuickWrite({
-        payload: {
-          session_id: editSessionId,
-          mode: 'edit',
-          style: 'general',
-          user_requirements: chatInput.trim(),
-          reference_content: '',
-          reference_filename: '',
-          rag_content: '',
-          rag_references: [],
-          quotes: [],
-          article_content: articleContent,
-          extracted_fields: {},
-          model_type: 'general',
-          llm_model: 'qwen'
-        },
-        fallbackSummary: '已完成修改',
-        onArticle: (liveArticle) => {
-          if (editSessionId === currentSessionIdRef.current && onArticleUpdate) {
-            onArticleUpdate(editSessionId, liveArticle, { persist: false })
-          }
-        },
-      })
-
-      await writeApi.saveArticle(editSessionId, articleResult)
-
-      if (onArticleUpdate && editSessionId === currentSessionIdRef.current) {
-        onArticleUpdate(editSessionId, articleResult, { persist: false })
-      }
-
-      const updatedChatHistory = [...newChatHistory, {
-        role: 'assistant',
-        content: summaryContent
-      }]
-
-      await writeApi.saveContent(editSessionId, summaryContent, 'quick', 'chat', 'assistant')
-
-      if (editSessionId === currentSessionIdRef.current) {
-        setDisplayChatHistory(updatedChatHistory)
-        if (onChatHistoryUpdate) {
-          onChatHistoryUpdate(editSessionId, updatedChatHistory)
-        }
-      }
+      await onAgentMessage?.(chatInput.trim())
+      setChatInput('')
     } catch (error) {
       console.error('修改失败:', error)
-    } finally {
-      setIsGenerating(false)
-      setChatInput('')
+      alert(error.message || 'Agent 任务创建失败')
     }
   }
 
@@ -112,6 +51,10 @@ function MainContent({ currentSession, editorContent, chatHistory, onArticleUpda
 
   return (
     <div className="main-content chatgpt-style">
+      <div className="conversation-header">
+        <strong>写作对话</strong>
+        <span>通过对话生成或提出正文修改</span>
+      </div>
       <div className="chat-history">
         {displayChatHistory.map((message, index) => (
           <div key={index} className={`chat-message ${message.role}`}>
@@ -127,8 +70,18 @@ function MainContent({ currentSession, editorContent, chatHistory, onArticleUpda
             </div>
           </div>
         ))}
+        {agentRun && (
+          <details className="agent-details" open={['queued', 'running'].includes(agentRun.status)}>
+            <summary>运行详情</summary>
+            <AgentRunPanel
+              run={agentRun}
+              events={agentEvents}
+              onCancel={onAgentCancel}
+              onRetry={onAgentRetry}
+            />
+          </details>
+        )}
       </div>
-
       <div className="chat-input-container">
         <div className="chat-input-box">
           <div className="edit-writing-inputs">
@@ -136,9 +89,9 @@ function MainContent({ currentSession, editorContent, chatHistory, onArticleUpda
               <textarea
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
-                disabled={isGenerating}
+                disabled={isBusy}
                 className="chat-textarea"
-                placeholder="输入全文改写要求（将重写整篇文章）..."
+                placeholder={editorContent ? '描述希望如何修改正文…' : '描述需要起草的公文…'}
                 rows={3}
               />
             </div>
@@ -148,9 +101,9 @@ function MainContent({ currentSession, editorContent, chatHistory, onArticleUpda
             <button
               className="chat-action-btn send-btn"
               onClick={handleEditSubmit}
-              disabled={isGenerating || !chatInput.trim()}
+              disabled={isBusy || !chatInput.trim()}
             >
-              {isGenerating ? '全文改写中...' : '全文改写'}
+              {isBusy ? '处理中…' : '发送'}
             </button>
           </div>
         </div>

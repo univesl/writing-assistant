@@ -46,10 +46,10 @@ export const writeApi = {
     })
   },
   
-  exportDocument: async (sessionId, exportType = 'md', referenceDoc = null) => {
+  exportDocument: async (sessionId, exportType = 'md', templateId = null) => {
     let url = `/content/export/${sessionId}?export_type=${exportType}`
-    if (referenceDoc) {
-      url += `&reference_doc=${encodeURIComponent(referenceDoc)}`
+    if (templateId) {
+      url += `&template_id=${encodeURIComponent(templateId)}`
     }
     const response = await apiClient.get(url, {
       responseType: 'blob'

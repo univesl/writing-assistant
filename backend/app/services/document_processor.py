@@ -17,7 +17,7 @@ from ..services.mineru_service import mineru_service
 
 
 # 会话文件存储根目录（与 KNG 的持久化知识库分开）
-SESSION_FILES_ROOT = Path(os.getenv("SESSION_FILES_ROOT", "/home/liubin/writing-assistant/session_files"))
+SESSION_FILES_ROOT = Path(os.getenv("SESSION_FILES_ROOT") or (Path(__file__).resolve().parents[3] / "session_files"))
 
 
 def ensure_session_dir(session_id: int) -> Path:
@@ -45,6 +45,18 @@ def save_uploaded_file(session_id: int, filename: str, content: bytes) -> Path:
     return file_path
 
 
+def decode_uploaded_text(content: bytes) -> str:
+    """Decode Chinese text without silently replacing damaged characters."""
+    if content.startswith(b"\xef\xbb\xbf"):
+        return content.decode("utf-8-sig")
+    for encoding in ("utf-8", "gb18030"):
+        try:
+            return content.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    raise UnicodeError("文本编码无法识别，请将文件保存为 UTF-8 或 GB18030 后重试")
+
+
 def parse_document(file_path: Path) -> Optional[str]:
     """
     解析文档为 Markdown
@@ -70,14 +82,13 @@ def parse_document(file_path: Path) -> Optional[str]:
                 os.unlink(md_temp_path)
                 return content
             return None
-        elif file_extension == '.md':
-            with open(file_path, 'r', encoding='utf-8') as f:
-                return f.read()
-        elif file_extension == '.txt':
-            with open(file_path, 'r', encoding='utf-8') as f:
-                return f.read()
+        elif file_extension in {'.md', '.txt'}:
+            with open(file_path, 'rb') as f:
+                return decode_uploaded_text(f.read())
         else:
             return None
+    except UnicodeError:
+        raise
     except Exception as e:
         print(f"[ERROR] 解析文档失败: {e}")
         return None

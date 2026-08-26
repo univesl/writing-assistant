@@ -296,6 +296,7 @@ function MarkdownArticleEditor({
       ref={editorRef}
       markdown={markdown}
       onChange={onChange}
+      readOnly={interactionLocked}
       plugins={editorPlugins}
       translation={translateEditor}
       placeholder="在此编辑 AI 生成的内容..."

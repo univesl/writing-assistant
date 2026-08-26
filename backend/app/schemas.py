@@ -57,6 +57,7 @@ class SaveArticleIn(BaseModel):
     article_content: str = Field(..., min_length=0)
     article_title: Optional[str] = Field(default=None, max_length=255)
     original_content: Optional[str] = None
+    base_version: Optional[int] = Field(default=None, ge=0)
 
 
 class FileUploadResponse(BaseModel):
@@ -110,6 +111,35 @@ class DocumentExtractionOut(BaseModel):
     content_length: int
     fields: dict
     parsed_content: Optional[str] = None
+
+
+class DocumentFileGuardIn(BaseModel):
+    """文件内容审查请求"""
+    filename: str = Field(..., min_length=1, description="文件名（含扩展名）")
+    content_base64: str = Field(..., min_length=1, description="文件内容的 Base64 编码")
+
+
+class DocumentFileGuardReview(BaseModel):
+    """内容审查结果"""
+    harmful: str
+    harmful_type: str = "none"
+    harmful_type_label: str = "无"
+    harmful_reason: str = ""
+    harmful_words: str = ""
+    harmful_degree: str = "none"
+    harmful_degree_label: str = "无"
+    confidence: str = "low"
+    confidence_label: str = "低"
+    highlight_spans: list = []
+    stage: Optional[str] = None
+
+
+class DocumentFileGuardOut(BaseModel):
+    """文件内容审查响应"""
+    filename: str
+    file_type: str
+    content_length: int
+    review: DocumentFileGuardReview
 
 
 class ExtractionModelListOut(BaseModel):

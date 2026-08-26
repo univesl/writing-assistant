@@ -25,6 +25,11 @@ venv/
 .env.*.local
 writing_assistant.db
 *.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
 session_files/
 upload/
 data/
@@ -69,6 +74,10 @@ Thumbs.db
 DEV_WORKFLOW.md
 DEPLOYMENT.md
 operation.md
+
+# Third-party skill source packages kept locally for review
+dknowc-official-doc-writer-main/
+dknowc-official-doc-writer-main.zip
 
 # Default export template directory
 format/*

@@ -6,23 +6,18 @@ import os
 import subprocess
 import tempfile
 import re
-import requests
+import uuid
+import zipfile
 from pathlib import Path
 from datetime import datetime
-from pydantic import BaseModel
 
 from ..database import get_db
-from ..models import Session as SessionModel, Content as ContentModel, Template
+from ..models import DocumentRevision, Session as SessionModel, Content as ContentModel, Template
 from ..utils import ok, err, dt_str
 from ..schemas import SaveArticleIn
 from ..services.mineru_service import mineru_service
 
 router = APIRouter(prefix="/content", tags=["content"])
-
-
-class GuardCheckIn(BaseModel):
-    session_id: int = None
-    text: str
 
 
 @router.get("/get/{session_id}")
@@ -58,7 +53,8 @@ def get_article(session_id: int, db: OrmSession = Depends(get_db)):
         return err(404, "会话不存在")
     
     return ok({
-        "article_content": s.article_content or ""
+        "article_content": s.article_content or "",
+        "article_version": s.article_version,
     })
 
 
@@ -69,10 +65,20 @@ def save_article(data: SaveArticleIn, db: OrmSession = Depends(get_db)):
         if not s:
             return err(404, "会话不存在")
         
+        if data.base_version is not None and data.base_version != s.article_version:
+            return err(409, "正文已被更新，请刷新后重试")
         s.article_content = data.article_content
+        s.article_version += 1
+        db.add(DocumentRevision(
+            revision_id=str(uuid.uuid4()),
+            session_id=s.session_id,
+            version=s.article_version,
+            article_content=data.article_content,
+            created_by="user",
+        ))
         db.commit()
         
-        return ok(None, "文章保存成功")
+        return ok({"article_version": s.article_version}, "文章保存成功")
     
     except Exception as e:
         print(f"[DEBUG] 保存文章失败: {str(e)}")
@@ -199,13 +205,38 @@ def _txt_to_markdown(text: str) -> str:
     return '\n'.join(md_lines)
 
 
+def _registered_template_path(template: Template | None) -> Path | None:
+    if template is None:
+        return None
+    format_dir = (Path(__file__).resolve().parents[3] / "format").resolve()
+    filename = Path(template.filename).name
+    if filename != template.filename:
+        return None
+    candidate = (format_dir / filename).resolve()
+    if format_dir not in candidate.parents or not candidate.is_file():
+        return None
+    if candidate.suffix.lower() != ".docx" or not zipfile.is_zipfile(candidate):
+        return None
+    return candidate
+
+
 @router.get("/export/{session_id}")
-def export_document(session_id: int, background_tasks: BackgroundTasks, export_type: str = "md", reference_doc: str = None, db: OrmSession = Depends(get_db)):
+def export_document(
+    session_id: int,
+    background_tasks: BackgroundTasks,
+    export_type: str = "md",
+    template_id: int | None = None,
+    reference_doc: str | None = None,
+    db: OrmSession = Depends(get_db),
+):
     """
     导出会话内容为文档
     export_type: "md" 或 "docx"
-    reference_doc: 参考文档的文件名（如果有docx参考文档，使用它作为模板）
+    template_id: 已登记的 DOCX 模板 ID。reference_doc 仅为旧前端兼容参数，仍需匹配数据库记录。
     """
+    temp_md_path = None
+    temp_docx_path = None
+    temp_file_path = None
     try:
         # 验证导出类型
         if export_type not in ['md', 'docx']:
@@ -270,36 +301,52 @@ def export_document(session_id: int, background_tasks: BackgroundTasks, export_t
             # 构建pandoc命令
             pandoc_cmd = ['pandoc', '-f', 'markdown', '-t', 'docx', '-o', temp_docx_path, temp_md_path]
             
-            # 查找参考文档模板
-            ref_filename = None
-            if reference_doc:
-                ref_filename = reference_doc
+            # 只允许使用数据库中登记且位于 format 目录内的有效 DOCX 模板。
+            selected_template = None
+            if template_id is not None:
+                selected_template = db.get(Template, template_id)
+                if selected_template is None:
+                    os.unlink(temp_md_path)
+                    return err(404, "导出模板不存在")
+            elif reference_doc:
+                selected_template = db.query(Template).filter(Template.filename == reference_doc).first()
+                if selected_template is None:
+                    os.unlink(temp_md_path)
+                    return err(400, "导出模板未登记")
             else:
-                default_tpl = db.query(Template).filter(Template.is_default == True).first()
-                if default_tpl:
-                    ref_filename = default_tpl.filename
+                selected_template = db.query(Template).filter(Template.is_default == True).first()
 
-            if ref_filename:
-                format_dir = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'format')
-                format_dir = os.path.abspath(format_dir)
-                reference_path = os.path.join(format_dir, ref_filename)
-                if os.path.exists(reference_path):
-                    pandoc_cmd = ['pandoc', '--reference-doc', reference_path, '-f', 'markdown', '-t', 'docx', '-o', temp_docx_path, temp_md_path]
-                else:
-                    print(f"[export] 模板文件不存在: {reference_path}")
-            result = subprocess.run(
-                pandoc_cmd,
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-            
-            # 清理临时markdown文件
-            os.unlink(temp_md_path)
+            if selected_template is not None:
+                reference_path = _registered_template_path(selected_template)
+                if reference_path is None:
+                    os.unlink(temp_md_path)
+                    return err(400, "导出模板不是有效的 DOCX 文件")
+                pandoc_cmd = [
+                    'pandoc', '--reference-doc', str(reference_path), '-f', 'markdown',
+                    '-t', 'docx', '-o', temp_docx_path, temp_md_path,
+                ]
+            try:
+                result = subprocess.run(
+                    pandoc_cmd,
+                    capture_output=True,
+                    text=True,
+                    encoding='utf-8',
+                    errors='replace',
+                    timeout=30,
+                )
+            finally:
+                if os.path.exists(temp_md_path):
+                    os.unlink(temp_md_path)
             
             if result.returncode != 0:
                 print(f"[DEBUG] Pandoc转换失败: {result.stderr}")
-                return err(500, f"文档转换失败: {result.stderr}")
+                if os.path.exists(temp_docx_path):
+                    os.unlink(temp_docx_path)
+                return err(500, "文档转换失败，请检查模板或稍后重试")
+            if not os.path.exists(temp_docx_path) or not zipfile.is_zipfile(temp_docx_path):
+                if os.path.exists(temp_docx_path):
+                    os.unlink(temp_docx_path)
+                return err(500, "Pandoc 未生成有效的 DOCX 文件")
             
             filename = f"{s.session_name}_{timestamp}.docx"
             
@@ -313,50 +360,7 @@ def export_document(session_id: int, background_tasks: BackgroundTasks, export_t
     
     except Exception as e:
         print(f"[DEBUG] 导出文档过程中出错: {str(e)}")
-        return err(500, f"导出文档失败: {str(e)}")
-
-
-GUARD_API_URL = os.getenv("GUARD_API_URL", "http://10.70.247.28:8006/guard")
-GUARD_API_TIMEOUT = float(os.getenv("GUARD_API_TIMEOUT", "30"))
-
-
-@router.post("/guard")
-def check_content_guard(data: GuardCheckIn):
-    """
-    内容审查：调用 guard 服务检查文本内容
-    """
-    if not data.text or not data.text.strip():
-        return err(400, "审查内容不能为空")
-
-    try:
-        response = requests.post(
-            GUARD_API_URL,
-            json={"text": data.text},
-            timeout=GUARD_API_TIMEOUT
-        )
-        response.raise_for_status()
-        result = response.json()
-
-        return ok({
-            "harmful": result.get("harmful", "false"),
-            "harmful_type": result.get("harmful_type", "none"),
-            "harmful_type_label": result.get("harmful_type_label", "无"),
-            "harmful_reason": result.get("harmful_reason", ""),
-            "harmful_words": result.get("harmful_words", ""),
-            "harmful_degree": result.get("harmful_degree", "none"),
-            "harmful_degree_label": result.get("harmful_degree_label", "无"),
-            "confidence": result.get("confidence", "low"),
-            "confidence_label": result.get("confidence_label", "低"),
-            "highlight_spans": result.get("highlight_spans", []),
-            "stage": result.get("stage"),
-        }, "内容审查完成")
-
-    except requests.exceptions.Timeout:
-        print(f"[DEBUG] 内容审查服务超时")
-        return err(504, "内容审查服务超时，请稍后重试")
-    except requests.exceptions.ConnectionError:
-        print(f"[DEBUG] 内容审查服务连接失败")
-        return err(502, "内容审查服务暂时不可用")
-    except Exception as e:
-        print(f"[DEBUG] 内容审查失败: {str(e)}")
-        return err(500, f"内容审查失败: {str(e)}")
+        for temporary_path in (temp_md_path, temp_docx_path, temp_file_path):
+            if temporary_path and os.path.exists(temporary_path):
+                os.unlink(temporary_path)
+        return err(500, "导出文档失败，请稍后重试")

@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from datetime import datetime
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -5,6 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 PORT = int(os.getenv("BACKEND_PORT", 9000))
 
@@ -15,6 +19,8 @@ from .routers import content as content_router
 from .routers import upload as upload_router
 from .routers import generate as generate_router
 from .routers import templates as templates_router
+from .routers import agent as agent_router
+from .agent.manager import get_agent_run_manager
 from .utils import err, ok, dt_str
 from .database import SessionLocal
 
@@ -42,7 +48,17 @@ def init_default_template():
 
 init_default_template()
 
-app = FastAPI(title="AI Writing Assistant Backend", version="1.0.0")
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    manager = get_agent_run_manager()
+    await manager.start()
+    try:
+        yield
+    finally:
+        await manager.stop()
+
+
+app = FastAPI(title="AI Writing Assistant Backend", version="2.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -58,6 +74,7 @@ app.include_router(content_router.router, prefix="/api")
 app.include_router(upload_router.router, prefix="/api")
 app.include_router(generate_router.router, prefix="/api")
 app.include_router(templates_router.router, prefix="/api")
+app.include_router(agent_router.router, prefix="/api")
 
 @app.get("/api/health")
 def health():

@@ -7,20 +7,30 @@ import EditorSidebar from './components/EditorSidebar'
 import StartPage from './components/StartPage'
 import { sessionApi } from './api/sessionApi'
 import { writeApi } from './api/writeApi'
+import { agentApi } from './api/agentApi'
+import { uploadApi } from './api/uploadApi'
 import {
   appendKnowledgeSources,
-  extractArticlePreview,
-  parseGeneratedOutput,
+  normalizeOfficialArticleFormat,
+  normalizeKnowledgeSourcesInMessage,
 } from './utils/generatedOutput'
 import { formatSessionTime } from './utils/sessionTime'
-import { streamQuickWrite } from './services/writeStream'
+import {
+  finishSessionTask,
+  getSessionTask,
+  startSessionTask,
+} from './utils/sessionTasks'
+import { streamAgentRun } from './services/agentRunStream'
 
-const getGenerationMessage = ({ writingMode, useRag }) => {
+const getGenerationMessage = ({ writingMode, useRag, useWebSearch }) => {
   if (writingMode === 'reference') {
     return '正在解析参考文档并生成公文，请稍候…'
   }
   if (useRag) {
-    return '正在检索知识库并生成公文，请稍候…'
+    return useWebSearch ? '正在检索知识库和公开资料并生成公文，请稍候…' : '正在检索知识库并生成公文，请稍候…'
+  }
+  if (useWebSearch) {
+    return '正在检索公开资料并生成公文，请稍候…'
   }
   return '正在生成公文，请稍候…'
 }
@@ -47,16 +57,165 @@ function App() {
   // 当前会话的引用列表
   const [currentQuotes, setCurrentQuotes] = useState([])
 
-  // 生成中状态
-  const [isGenerating, setIsGenerating] = useState(false)
-  const [generationMessage, setGenerationMessage] = useState('')
+  // 按会话保存正文任务。不同会话可以并行，同一会话只允许一个会改写正文的任务。
+  const [sessionTasks, setSessionTasks] = useState({})
+  const [agentRuns, setAgentRuns] = useState({})
+  const [agentEvents, setAgentEvents] = useState({})
 
   // 用于跟踪组件是否已挂载，避免竞态条件
   const isMountedRef = useRef(true)
   const isLoadingRef = useRef(false)
   const sessionLoadIdRef = useRef(0)
   const currentSessionIdRef = useRef(null)
+  const sessionTasksRef = useRef({})
+  const operationCounterRef = useRef(0)
+  const agentStreamsRef = useRef(new Map())
+  const agentOperationsRef = useRef(new Map())
+  const completedAgentRunsRef = useRef(new Set())
   const selectedSessionId = currentSession?.id || null
+  const currentTask = getSessionTask(sessionTasks, selectedSessionId)
+  const currentAgentRun = selectedSessionId ? agentRuns[String(selectedSessionId)] : null
+  const currentAgentEvents = currentAgentRun ? (agentEvents[currentAgentRun.run_id] || []) : []
+  const currentAgentActive = ['queued', 'running'].includes(currentAgentRun?.status)
+  const activeAgentSessionIds = Object.values(agentRuns)
+    .filter(run => ['queued', 'running'].includes(run.status))
+    .map(run => run.session_id)
+  const activeTaskCount = new Set([
+    ...Object.keys(sessionTasks).map(Number),
+    ...activeAgentSessionIds,
+  ]).size
+
+  const beginSessionTask = (sessionId, kind, message) => {
+    const operationId = `${sessionId}-${Date.now()}-${++operationCounterRef.current}`
+    const result = startSessionTask(sessionTasksRef.current, sessionId, {
+      operationId,
+      kind,
+      message,
+    })
+    if (!result) return null
+
+    sessionTasksRef.current = result.tasks
+    setSessionTasks(result.tasks)
+    return operationId
+  }
+
+  const updateSessionTaskMessage = (sessionId, operationId, message) => {
+    const key = String(sessionId)
+    const current = sessionTasksRef.current[key]
+    if (!current || current.operationId !== operationId) return
+
+    const next = {
+      ...sessionTasksRef.current,
+      [key]: { ...current, message },
+    }
+    sessionTasksRef.current = next
+    setSessionTasks(next)
+  }
+
+  const endSessionTask = (sessionId, operationId) => {
+    const next = finishSessionTask(sessionTasksRef.current, sessionId, operationId)
+    if (next === sessionTasksRef.current) return
+    sessionTasksRef.current = next
+    setSessionTasks(next)
+  }
+
+  const mergeAgentRun = (run) => {
+    if (!run?.session_id) return
+    setAgentRuns(previous => ({ ...previous, [String(run.session_id)]: run }))
+  }
+
+  const finishAgentUi = (run, data = {}, addSummary = true) => {
+    const finalRun = {
+      ...run,
+      status: 'completed',
+      current_stage: 'finalize',
+      final_article: data.article || run.final_article,
+      article_snapshot: data.article || run.article_snapshot,
+      summary: data.summary || run.summary,
+      references: data.references || run.references || [],
+      warnings: data.warnings || run.warnings || [],
+      issues: data.issues || run.issues || [],
+      outcome: data.outcome || run.outcome || 'document',
+      applied_version: data.applied_version ?? run.applied_version,
+      activated_skills: data.activated_skills || run.activated_skills || [],
+      workflow_plan: data.workflow_plan || run.workflow_plan || {},
+    }
+    mergeAgentRun(finalRun)
+    if (run.session_id === currentSessionIdRef.current && finalRun.final_article) {
+      setCurrentSessionOutput(finalRun.final_article)
+      setEditorRealtimeContent(finalRun.final_article)
+      setCurrentPage('content')
+      if (addSummary && finalRun.summary && !completedAgentRunsRef.current.has(run.run_id)) {
+        setCurrentChatHistory(previous => [...previous, {
+          role: 'assistant',
+          content: appendKnowledgeSources(finalRun.summary, finalRun.references),
+        }])
+      }
+    }
+    completedAgentRunsRef.current.add(run.run_id)
+  }
+
+  const connectAgentRun = (run, operationId = null, { replayOnly = false, after = 0 } = {}) => {
+    if (!run?.run_id || agentStreamsRef.current.has(run.run_id)) return
+    const controller = new AbortController()
+    agentStreamsRef.current.set(run.run_id, controller)
+    if (operationId) agentOperationsRef.current.set(run.run_id, operationId)
+    let liveRun = run
+
+    streamAgentRun({
+      runId: run.run_id,
+      after,
+      initialArticle: after > 0 ? (run.article_snapshot || '') : '',
+      signal: controller.signal,
+      onArticle: (article) => {
+        const initialDraft = ['quick', 'draft', 'reference', 'reply', 'imitate'].includes(run.task_type)
+          && Number(run.base_version || 0) === 0
+        if (initialDraft && run.session_id === currentSessionIdRef.current) {
+          setCurrentSessionOutput(article)
+          setEditorRealtimeContent(article)
+          setCurrentPage('content')
+        }
+      },
+      onEvent: (event) => {
+        setAgentEvents(previous => {
+          const existing = previous[run.run_id] || []
+          if (existing.some(item => item.id === event.id)) return previous
+          return { ...previous, [run.run_id]: [...existing, event] }
+        })
+        if (event.type === 'stage.started') {
+          liveRun = { ...liveRun, status: 'running', current_stage: event.stage }
+          mergeAgentRun(liveRun)
+          const op = agentOperationsRef.current.get(run.run_id)
+          if (op) updateSessionTaskMessage(run.session_id, op, `Agent 正在执行：${event.data?.label || event.stage}`)
+        } else if (event.type === 'run.completed') {
+          finishAgentUi(liveRun, event.data, !replayOnly)
+        } else if (event.type === 'run.failed' || event.type === 'run.cancelled') {
+          liveRun = {
+            ...liveRun,
+            status: event.type === 'run.failed' ? 'failed' : 'cancelled',
+            error: event.data,
+          }
+          mergeAgentRun(liveRun)
+        }
+      },
+    }).catch(error => {
+      if (error.name !== 'AbortError') console.error('Agent 事件流中断:', error)
+    }).finally(async () => {
+      agentStreamsRef.current.delete(run.run_id)
+      try {
+        const snapshot = await agentApi.getRun(run.run_id)
+        mergeAgentRun(snapshot)
+        if (snapshot.status === 'completed') finishAgentUi(snapshot, snapshot, false)
+      } catch (error) {
+        if (!controller.signal.aborted) console.error('恢复 Agent 状态失败:', error)
+      }
+      const op = agentOperationsRef.current.get(run.run_id)
+      if (op) {
+        endSessionTask(run.session_id, op)
+        agentOperationsRef.current.delete(run.run_id)
+      }
+    })
+  }
 
   // 左侧栏显示状态
   const [isSidebarOpen] = useState(() => {
@@ -132,26 +291,42 @@ function App() {
     setCurrentChatHistory([])
 
     try {
-      const [articleResponse, chatResponse] = await Promise.all([
+      const [articleResponse, chatResponse, runResponse] = await Promise.all([
         writeApi.getArticle(sessionId),
         writeApi.getSessionContent(sessionId),
+        agentApi.listRuns(sessionId, 1).catch(() => []),
       ])
 
       if (!isMountedRef.current || loadId !== sessionLoadIdRef.current) {
         return
       }
 
-      const articleText = articleResponse?.article_content || ''
+      // 旧会话中已经保存的模型 Markdown 也在加载时收敛，避免用户必须重新
+      // 生成才能看到公文编号格式；正式的“一、”“1、”“第一条”“（一）”会保留。
+      const articleText = normalizeOfficialArticleFormat(articleResponse?.article_content || '')
       const hasArticle = articleText.trim().length > 0
 
-      setCurrentSessionOutput(hasArticle ? articleText : '')
-      setEditorRealtimeContent(hasArticle ? articleText : '')
-      setCurrentPage(hasArticle ? 'content' : 'start')
+      const latestRun = runResponse?.[0] || null
+      const initialTask = latestRun && ['quick', 'draft', 'reference', 'reply', 'imitate'].includes(latestRun.task_type)
+        && Number(latestRun.base_version || 0) === 0
+      const recoverableDraft = latestRun && initialTask && ['queued', 'running'].includes(latestRun.status)
+        ? normalizeOfficialArticleFormat(latestRun.article_snapshot || '')
+        : ''
+      const visibleArticle = recoverableDraft || (hasArticle ? articleText : '')
+      setCurrentSessionOutput(visibleArticle)
+      setEditorRealtimeContent(visibleArticle)
+      setCurrentPage(visibleArticle.trim() ? 'content' : 'start')
+
+      if (latestRun) {
+        mergeAgentRun(latestRun)
+        if (latestRun.status === 'completed') completedAgentRunsRef.current.add(latestRun.run_id)
+        connectAgentRun(latestRun, null, { replayOnly: true })
+      }
 
       if (chatResponse && chatResponse.length > 0) {
         setCurrentChatHistory(chatResponse.map(item => ({
           role: item.role,
-          content: item.content
+          content: normalizeKnowledgeSourcesInMessage(item.content)
         })))
       } else {
         setCurrentChatHistory([])
@@ -172,8 +347,11 @@ function App() {
   useEffect(() => {
     isMountedRef.current = true
     loadSessions()
+    const agentStreams = agentStreamsRef.current
     return () => {
       isMountedRef.current = false
+      agentStreams.forEach(controller => controller.abort())
+      agentStreams.clear()
     }
   }, [])
 
@@ -192,6 +370,8 @@ function App() {
       setCurrentChatHistory([])
       setCurrentQuotes([])
     }
+  // loadSessionContent intentionally reads the latest refs while the session id is the trigger.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedSessionId])
 
   // 保存侧边栏状态到localStorage
@@ -241,6 +421,11 @@ function App() {
 
   // 处理删除会话
   const handleDeleteSession = async (sessionId) => {
+    if (getSessionTask(sessionTasksRef.current, sessionId)) {
+      alert('该会话仍有任务运行，完成后再删除')
+      return
+    }
+
     try {
       // 调用后端API删除会话
       await sessionApi.deleteSession(sessionId)
@@ -387,19 +572,26 @@ function App() {
   }
 
   // 处理编辑器内容实时变化
-  const handleEditorContentChange = (content) => {
-    setEditorRealtimeContent(content)
+  const handleEditorContentChange = (sessionId, content) => {
+    if (sessionId === currentSessionIdRef.current) {
+      setEditorRealtimeContent(content)
+    }
   }
 
   // 处理从 StartPage 发起的生成请求
   const handleStartGeneration = async (config) => {
-    if (!currentSession || isGenerating) return
-    setGenerationMessage(getGenerationMessage(config))
-    setIsGenerating(true)
+    if (!currentSession) return
     const generationSessionId = currentSession.id
+    const operationId = beginSessionTask(
+      generationSessionId,
+      'generate',
+      getGenerationMessage(config),
+    )
+    if (!operationId) return
+    let agentOwnsTask = false
 
     try {
-      const { writingMode, templateType, quickRequirements, referenceDocuments, referenceWriteType, referenceRequirements, useRag } = config
+      const { writingMode, templateType, quickRequirements, referenceDocuments, referenceWriteType, referenceRequirements, useRag, useWebSearch } = config
 
       // 构建用户显示内容
       let userDisplayContent = ''
@@ -418,8 +610,8 @@ function App() {
         if (uploadDocs.length > 0) {
           const typeLabels = {
             reply: '根据上传文件生成回函',
-            imitate: '仿照上传文件风格写新公文',
-            general: '基于上传文件内容生成公文'
+            imitate: '按结构和风格优先进行智能参考写作',
+            general: '智能分析上传文件并生成新文稿'
           }
           userDisplayContent = `${typeLabels[referenceWriteType] || '参考写作'}`
           userDisplayContent += `（共 ${uploadDocs.length} 份参考材料）`
@@ -441,140 +633,155 @@ function App() {
         setCurrentSessionOutput('')
         setEditorRealtimeContent('')
         setCurrentPage('content')
-
-        // RAG 统一由后端在 /api/write/quick 中自动做，前端不预调用
-        const { articleContent, summaryContent, rag } = await streamQuickWrite({
-          payload: {
-            session_id: generationSessionId,
-            mode: 'quick',
-            style: templateType || 'general',
-            user_requirements: quickRequirements || '',
-            reference_content: '',
-            reference_filename: '',
-            rag_content: '',
-            rag_references: [],
-            quotes: [],
-            article_content: '',
-            extracted_fields: {},
-            model_type: 'general',
-            llm_model: 'qwen',
-            use_rag: useRag || false,
-          },
-          timeoutMs: 120000,
-          fallbackSummary: '已生成文章',
-          onArticle: (liveArticle) => {
-            if (generationSessionId === currentSessionIdRef.current) {
-              if (liveArticle) {
-                setGenerationMessage('正在生成正文，内容将持续显示…')
-              }
-              setCurrentSessionOutput(liveArticle)
-              setEditorRealtimeContent(liveArticle)
-            }
-          },
+        updateSessionTaskMessage(generationSessionId, operationId, '正在创建 Agent 运行…')
+        const run = await agentApi.createRun({
+          session_id: generationSessionId,
+          task_type: 'quick',
+          document_type: templateType || 'general',
+          requirements: quickRequirements || '',
+          use_kng: Boolean(useRag),
+          use_web_search: Boolean(useWebSearch),
         })
-
-        await writeApi.saveArticle(generationSessionId, articleContent)
-        const assistantSummary = appendKnowledgeSources(summaryContent, rag?.references)
-
-        const updatedChatHistory = [...newChatHistory, {
-          role: 'assistant',
-          content: assistantSummary
-        }]
-        await writeApi.saveContent(generationSessionId, assistantSummary, 'quick', 'chat', 'assistant')
-
-        if (generationSessionId === currentSessionIdRef.current) {
-          setCurrentChatHistory(updatedChatHistory)
-          setCurrentSessionOutput(articleContent)
-          setEditorRealtimeContent(articleContent)
-          setCurrentPage('content')
-        }
-
+        mergeAgentRun(run)
+        setAgentEvents(previous => ({ ...previous, [run.run_id]: [] }))
+        connectAgentRun(run, operationId)
+        agentOwnsTask = true
 
       } else if (writingMode === 'reference') {
         const uploadDocs = referenceDocuments.filter(d => d.type === 'upload')
         if (uploadDocs.length === 0) return
 
-        setGenerationMessage(`正在解析 ${uploadDocs.length} 份参考材料…`)
-        const formData = new FormData()
-        uploadDocs.forEach(doc => formData.append('files', doc.file, doc.filename))
-        formData.append('session_id', String(generationSessionId))
-        formData.append('generate_type', referenceWriteType)
-        formData.append('topic', referenceRequirements.trim() || uploadDocs.map(doc => doc.filename).join('、'))
-        formData.append('requirements', referenceRequirements.trim())
-        formData.append('use_knowledge_base', String(useRag || false))
-        formData.append('top_k', '3')
-
-        const response = await fetch('/api/generate/reference-write-files', {
-          method: 'POST',
-          body: formData
-        })
-
-        if (!response.ok) {
-          const errorPayload = await response.json().catch(() => null)
-          throw new Error(errorPayload?.detail || errorPayload?.msg || `请求失败: ${response.status}`)
+        updateSessionTaskMessage(
+          generationSessionId,
+          operationId,
+          `正在解析 ${uploadDocs.length} 份参考材料…`,
+        )
+        const uploaded = []
+        for (const doc of uploadDocs) {
+          updateSessionTaskMessage(generationSessionId, operationId, `正在解析：${doc.filename}`)
+          uploaded.push(await uploadApi.uploadFile(generationSessionId, doc.file, true, false))
         }
-        if (!response.body || !response.body.getReader) {
-          const text = await response.text()
-          throw new Error(text || '响应格式错误')
-        }
-
-        setGenerationMessage('参考材料解析完成，正在生成正文…')
-        const reader = response.body.getReader()
-        const decoder = new TextDecoder()
-        let fullContent = ''
+        const sourceFileIds = uploaded.map(item => item.file_id)
         setCurrentSessionOutput('')
         setEditorRealtimeContent('')
         setCurrentPage('content')
-
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-          fullContent += decoder.decode(value, { stream: true })
-
-          const liveArticle = extractArticlePreview(fullContent)
-          if (liveArticle && generationSessionId === currentSessionIdRef.current) {
-            setGenerationMessage('正在生成正文，内容将持续显示…')
-            setCurrentSessionOutput(liveArticle)
-            setEditorRealtimeContent(liveArticle)
-          }
-        }
-
-        const typeLabels = {
-          reply: '生成回函',
-          imitate: '仿写公文',
-          general: '基于内容生成'
-        }
-        const fallbackSummary = (typeLabels[referenceWriteType] || '参考写作') + '完成'
-        const { articleContent, summaryContent } = parseGeneratedOutput(fullContent, fallbackSummary)
-
-        await writeApi.saveArticle(generationSessionId, articleContent)
-
-        const updatedChatHistory = [...newChatHistory, {
-          role: 'assistant',
-          content: summaryContent
-        }]
-        await writeApi.saveContent(generationSessionId, summaryContent, 'reference', 'chat', 'assistant')
-
-        if (generationSessionId === currentSessionIdRef.current) {
-          setCurrentChatHistory(updatedChatHistory)
-          setCurrentSessionOutput(articleContent)
-          setEditorRealtimeContent(articleContent)
-          setCurrentPage('content')
-        }
+        updateSessionTaskMessage(generationSessionId, operationId, '参考材料已解析，正在创建 Agent 运行…')
+        const run = await agentApi.createRun({
+          session_id: generationSessionId,
+          task_type: referenceWriteType === 'general' ? 'reference' : referenceWriteType,
+          document_type: templateType || 'general',
+          requirements: referenceRequirements.trim(),
+          source_file_ids: sourceFileIds,
+          use_kng: Boolean(useRag),
+          use_web_search: Boolean(useWebSearch),
+        })
+        mergeAgentRun(run)
+        setAgentEvents(previous => ({ ...previous, [run.run_id]: [] }))
+        connectAgentRun(run, operationId)
+        agentOwnsTask = true
       }
     } catch (error) {
       console.error('生成失败:', error)
-      alert('生成失败: ' + (error.message || '未知错误'))
+      if (generationSessionId === currentSessionIdRef.current) {
+        alert('生成失败: ' + (error.message || '未知错误'))
+      }
     } finally {
-      setIsGenerating(false)
-      setGenerationMessage('')
+      if (!agentOwnsTask) endSessionTask(generationSessionId, operationId)
+    }
+  }
+
+  const handleAgentCancel = async (run) => {
+    try {
+      const updated = await agentApi.cancelRun(run.run_id)
+      mergeAgentRun(updated)
+    } catch (error) {
+      alert(error.message || '取消失败')
+    }
+  }
+
+  const handleAgentRetry = async (run) => {
+    const operationId = beginSessionTask(run.session_id, 'agent-retry', '正在从安全检查点恢复…')
+    if (!operationId) return
+    try {
+      const previousCursor = run.last_event_seq || 0
+      completedAgentRunsRef.current.delete(run.run_id)
+      const updated = await agentApi.retryRun(run.run_id)
+      mergeAgentRun(updated)
+      connectAgentRun(updated, operationId, { after: previousCursor })
+    } catch (error) {
+      endSessionTask(run.session_id, operationId)
+      alert(error.message || '重试失败')
+    }
+  }
+
+  const handleAgentMessage = async (instruction) => {
+    if (!currentSession || !instruction.trim()) return
+    const sessionId = currentSession.id
+    const operationId = beginSessionTask(sessionId, 'agent-message', 'Agent 正在准备修改提案…')
+    if (!operationId) return
+    const userMessage = { role: 'user', content: instruction.trim() }
+    setCurrentChatHistory(previous => [...previous, userMessage])
+    writeApi.saveContent(sessionId, userMessage.content, 'quick', 'chat', 'user').catch(() => {})
+    try {
+      const latestArticle = editorRealtimeContent || currentSessionOutput || ''
+      if (latestArticle !== currentSessionOutput) {
+        await writeApi.saveArticle(sessionId, latestArticle)
+        setCurrentSessionOutput(latestArticle)
+      }
+      const run = await agentApi.createRun({
+        session_id: sessionId,
+        task_type: latestArticle.trim() ? 'revise_document' : 'draft',
+        document_type: currentAgentRun?.document_type || 'general',
+        requirements: instruction.trim(),
+        base_article: latestArticle,
+        use_kng: false,
+      })
+      mergeAgentRun(run)
+      setAgentEvents(previous => ({ ...previous, [run.run_id]: [] }))
+      connectAgentRun(run, operationId)
+      return true
+    } catch (error) {
+      endSessionTask(sessionId, operationId)
+      throw error
+    }
+  }
+
+  const handleAgentSelectionMessage = async ({ instruction, selectedMarkdown, selectionContext, baseArticle }) => {
+    if (!currentSession || !instruction.trim() || !selectedMarkdown.trim()) return
+    const sessionId = currentSession.id
+    const operationId = beginSessionTask(sessionId, 'agent-selection', 'Agent 正在生成选区修改提案…')
+    if (!operationId) return
+    const userContent = `修改选区：${instruction.trim()}`
+    setCurrentChatHistory(previous => [...previous, { role: 'user', content: userContent }])
+    writeApi.saveContent(sessionId, userContent, 'quick', 'chat', 'user').catch(() => {})
+    try {
+      if (baseArticle !== currentSessionOutput) {
+        await writeApi.saveArticle(sessionId, baseArticle)
+        setCurrentSessionOutput(baseArticle)
+      }
+      const run = await agentApi.createRun({
+        session_id: sessionId,
+        task_type: 'revise_selection',
+        document_type: currentAgentRun?.document_type || 'general',
+        requirements: instruction.trim(),
+        base_article: baseArticle,
+        selection: { selected_markdown: selectedMarkdown, ...selectionContext },
+        use_kng: false,
+      })
+      mergeAgentRun(run)
+      setAgentEvents(previous => ({ ...previous, [run.run_id]: [] }))
+      connectAgentRun(run, operationId)
+      return true
+    } catch (error) {
+      endSessionTask(sessionId, operationId)
+      throw error
     }
   }
 
   return (
     <div className="app-container">
       <TopNav />
-      {isGenerating && (
+      {activeTaskCount > 0 && (
         <div
           className="generation-status"
           role="status"
@@ -584,8 +791,10 @@ function App() {
         >
           <span className="generation-status-spinner" aria-hidden="true" />
           <div className="generation-status-copy">
-            <strong>正在生成</strong>
-            <span>{generationMessage}</span>
+            <strong>
+              {activeTaskCount > 1 ? `正在处理 ${activeTaskCount} 个会话` : '正在处理'}
+            </strong>
+            <span>{currentTask?.message || (currentAgentActive ? 'Agent 正在后台处理当前正文…' : '其他会话正在后台处理…')}</span>
           </div>
         </div>
       )}
@@ -598,26 +807,20 @@ function App() {
           onDeleteSession={handleDeleteSession}
           onRenameSession={handleRenameSession}
           isOpen={isSidebarOpen}
+          activeRunSessionIds={activeAgentSessionIds}
         />
         {currentSession ? (
           currentPage === 'start' ? (
             <StartPage
+              key={`start-${currentSession.id}`}
               currentSession={currentSession}
               onGenerate={handleStartGeneration}
-              isGenerating={isGenerating}
+              isGenerating={Boolean(currentTask) || currentAgentActive}
             />
           ) : (
             <>
-              <EditorSidebar
-                currentSession={currentSession}
-                currentOutput={currentSessionOutput}
-                onArticleUpdate={handleArticleUpdate}
-                onAddQuote={handleAddQuote}
-                onEditorContentChange={handleEditorContentChange}
-                chatHistory={currentChatHistory}
-                onChatHistoryUpdate={handleChatHistoryUpdate}
-              />
               <MainContent
+                key={`main-${currentSession.id}`}
                 currentSession={currentSession}
                 currentOutput={currentSessionOutput}
                 editorContent={editorRealtimeContent}
@@ -627,6 +830,29 @@ function App() {
                 quotes={currentQuotes}
                 onRemoveQuote={handleRemoveQuote}
                 onClearQuotes={handleClearQuotes}
+                isBusy={Boolean(currentTask) || currentAgentActive}
+                onTaskStart={beginSessionTask}
+                onTaskFinish={endSessionTask}
+                agentRun={currentAgentRun}
+                agentEvents={currentAgentEvents}
+                onAgentCancel={handleAgentCancel}
+                onAgentRetry={handleAgentRetry}
+                onAgentMessage={handleAgentMessage}
+              />
+              <EditorSidebar
+                key={`editor-${currentSession.id}`}
+                currentSession={currentSession}
+                currentOutput={currentSessionOutput}
+                onArticleUpdate={handleArticleUpdate}
+                onAddQuote={handleAddQuote}
+                onEditorContentChange={handleEditorContentChange}
+                chatHistory={currentChatHistory}
+                onChatHistoryUpdate={handleChatHistoryUpdate}
+                isBusy={Boolean(currentTask) || currentAgentActive}
+                onTaskStart={beginSessionTask}
+                onTaskFinish={endSessionTask}
+                isSessionActive={(sessionId) => sessionId === currentSessionIdRef.current}
+                onAgentSelectionMessage={handleAgentSelectionMessage}
               />
             </>
           )

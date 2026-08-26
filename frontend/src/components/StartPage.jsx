@@ -9,6 +9,7 @@ function StartPage({ currentSession, onGenerate, isGenerating }) {
   const [referenceWriteType, setReferenceWriteType] = useState('general')
   const [referenceRequirements, setReferenceRequirements] = useState('')
   const [useRag, setUseRag] = useState(false)
+  const [useWebSearch, setUseWebSearch] = useState(false)
   const fileInputRef = useRef(null)
   const templateFileInputRef = useRef(null)
 
@@ -56,6 +57,7 @@ function StartPage({ currentSession, onGenerate, isGenerating }) {
       referenceWriteType,
       referenceRequirements,
       useRag,
+      useWebSearch,
     })
   }
 
@@ -245,12 +247,33 @@ function StartPage({ currentSession, onGenerate, isGenerating }) {
             </section>
 
             <section className="start-section">
-              <h2 className="section-title">生成类型</h2>
+              <h2 className="section-title">目标文体</h2>
+              <div className="template-options-grid">
+                {[
+                  { value: '', label: '自动判断', desc: '根据要求和参考材料在支持范围内判断文体' },
+                  { value: 'notice', label: '通知', desc: '发布事项、安排活动或部署工作' },
+                  { value: 'regulation', label: '规章制度', desc: '管理办法、规定、细则或制度方案' },
+                  { value: 'speech', label: '讲话稿', desc: '会议讲话、致辞或交流发言' },
+                ].map(t => (
+                  <div
+                    key={t.value}
+                    className={`template-card ${templateType === t.value ? 'active green' : ''}`}
+                    onClick={() => setTemplateType(t.value)}
+                  >
+                    <div className="template-card-label">{t.label}</div>
+                    <div className="template-card-desc">{t.desc}</div>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="start-section">
+              <h2 className="section-title">参考方式</h2>
               <div className="template-options-grid three-col">
                 {[
                   { value: 'reply', label: '生成回函', desc: '根据文档内容生成正式回函' },
-                  { value: 'imitate', label: '仿写公文', desc: '学习文档风格和结构，写新主题公文' },
-                  { value: 'general', label: '基于内容生成', desc: '基于文档内容生成相关公文' },
+                  { value: 'imitate', label: '结构/风格优先', desc: '优先学习指定材料的骨架和表达，事实仍单独判断' },
+                  { value: 'general', label: '智能参考写作', desc: '逐份分析内容、结构和风格用途后生成新文稿' },
                 ].map(t => (
                   <div
                     key={t.value}
@@ -265,12 +288,12 @@ function StartPage({ currentSession, onGenerate, isGenerating }) {
             </section>
 
             <section className="start-section">
-              <h2 className="section-title">补充要求（可选）</h2>
+              <h2 className="section-title">写作及材料使用要求（可选）</h2>
               <textarea
                 value={referenceRequirements}
                 onChange={(e) => setReferenceRequirements(e.target.value)}
                 className="start-textarea"
-                placeholder="输入补充要求，如主题、风格要求等..."
+                placeholder="例如：以第二份材料为骨架，第一份只参考内容；重点写网络安全值守，不使用第三份材料中的案例…"
                 rows={3}
                 disabled={isGenerating}
               />
@@ -330,7 +353,7 @@ function StartPage({ currentSession, onGenerate, isGenerating }) {
         </div>
 
         {/* 知识库检索开关 */}
-        {writingMode === 'quick' && (
+        {(writingMode === 'quick' || writingMode === 'reference') && (
           <div className="rag-toggle">
             <label className="rag-toggle-label">
               <input
@@ -341,6 +364,21 @@ function StartPage({ currentSession, onGenerate, isGenerating }) {
               />
               <span className="rag-toggle-text">启用知识库检索</span>
               <span className="rag-toggle-hint">勾选后生成时参考知识库内容，响应时间可能增加</span>
+            </label>
+          </div>
+        )}
+
+        {(writingMode === 'quick' || writingMode === 'reference') && (
+          <div className="rag-toggle">
+            <label className="rag-toggle-label">
+              <input
+                type="checkbox"
+                checked={useWebSearch}
+                onChange={(e) => setUseWebSearch(e.target.checked)}
+                disabled={isGenerating}
+              />
+              <span className="rag-toggle-text">启用联网检索</span>
+              <span className="rag-toggle-hint">仅在服务端配置搜索服务时生效，优先使用公开官方来源</span>
             </label>
           </div>
         )}

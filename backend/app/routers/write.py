@@ -1,7 +1,7 @@
 import asyncio
 import json
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session as OrmSession
 
@@ -12,6 +12,8 @@ from ..utils import ok
 from ..services.llm import stream_text_from_llm
 from ..services.prompt_builder import build_prompt, build_selection_edit_prompt
 from ..services.kng_rag_service import get_kng_rag_service
+from ..agent.manager import ActiveRunError, get_agent_run_manager
+from ..agent.schemas import CreateAgentRunRequest
 
 router = APIRouter(prefix="/write", tags=["write"])
 
@@ -82,6 +84,63 @@ async def write_quick(payload: WriteQuickIn, db: OrmSession = Depends(get_db)):
         db.commit()
         db.refresh(session)
         payload.session_id = session.session_id
+
+    # The legacy endpoint remains available, but quick drafting now runs through the
+    # same durable graph. Only this adapter emits ARTICLE/SUMMARY markers.
+    if payload.mode == "quick" and payload.style in {"general", "notice", "regulation", "speech"}:
+        manager = get_agent_run_manager()
+        try:
+            run = await manager.create_run(
+                CreateAgentRunRequest(
+                    session_id=payload.session_id,
+                    document_type=payload.style,
+                    requirements=payload.user_requirements,
+                    use_kng=payload.use_rag,
+                    model_profile_id=None,
+                )
+            )
+        except ActiveRunError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "active_run_exists", "run_id": str(exc)},
+            )
+
+        async def legacy_agent_stream():
+            cursor = 0
+            while True:
+                events = await asyncio.to_thread(manager.events_after, run.run_id, cursor)
+                for event in events:
+                    cursor = event.id
+                    if event.type == "run.completed":
+                        data = event.data
+                        article = data.get("article", "")
+                        summary = data.get("summary", "已生成文章")
+                        legacy_content = f"---ARTICLE---\n{article}\n---SUMMARY---\n{summary}"
+                        rag = {
+                            "requested": payload.use_rag,
+                            "used": bool(data.get("references")),
+                            "references": data.get("references", []),
+                        }
+                        yield sse_pack(legacy_content, False)
+                        yield sse_pack("", True, rag=rag, run_id=run.run_id)
+                        return
+                    if event.type in {"run.failed", "run.cancelled"}:
+                        yield sse_pack(
+                            "",
+                            True,
+                            run_id=run.run_id,
+                            error=event.data.get("message", "Agent 运行未完成"),
+                        )
+                        return
+                await asyncio.sleep(0.25)
+
+        headers = {
+            "Cache-Control": "no-cache",
+            "Content-Type": "text/event-stream",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
+        return StreamingResponse(legacy_agent_stream(), headers=headers, media_type="text/event-stream")
 
     # 仅当用户勾选了"启用知识库检索"且未提供 rag_content 时，才做 RAG 检索
     rag_content, rag_references, rag_info = await _retrieve_rag_content(payload)

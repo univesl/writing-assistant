@@ -1,206 +1,282 @@
+"""Direct client for the deployed MinerU Router service.
+
+Writing Assistant keeps this adapter separate from ``doc-extraction-server``.
+The public ``parse_pdf_to_markdown`` method is retained for existing upload
+flows, while the implementation talks directly to MinerU's asynchronous
+``/tasks`` API.
+"""
+
+from __future__ import annotations
+
 import os
 import time
-import zipfile
-import requests
-import subprocess
-from typing import Optional
 from pathlib import Path
+from typing import Any, Optional
+
+import requests
 
 
-#MINERU_API_TOKEN = "eyJ0eXBlIjoiSldUIiwiYWxnIjoiSFM1MTIifQ.eyJqdGkiOiI5OTYwMDQ2MiIsInJvbCI6IlJPTEVfUkVHSVNURVIiLCJpc3MiOiJPcGVuWExhYiIsImlhdCI6MTc3MzY2OTM4OCwiY2xpZW50SWQiOiJsa3pkeDU3bnZ5MjJqa3BxOXgydyIsInBob25lIjoiIiwib3BlbklkIjpudWxsLCJ1dWlkIjoiMDlhMzJjY2UtNjQ2ZC00ZDBmLTkwNmItYzFmNmQyMTIxZWEyIiwiZW1haWwiOiIiLCJleHAiOjE3ODE0NDUzODh9.bipmOnt_uzJdIi99EDrOWYgeJYyZGKrFywbqKkprkLgOBud9fUKALW5AHcpt9A14U9U58cFIsg4xaK0vCcHz9Q"
-MINERU_API_TOKEN = "eyJ0eXBlIjoiSldUIiwiYWxnIjoiSFM1MTIifQ.eyJqdGkiOiIyNTUwMDc3MSIsInJvbCI6IlJPTEVfUkVHSVNURVIiLCJpc3MiOiJPcGVuWExhYiIsImlhdCI6MTc3ODEyNjE2MiwiY2xpZW50SWQiOiJsa3pkeDU3bnZ5MjJqa3BxOXgydyIsInBob25lIjoiMTUxMzcwOTYxNTkiLCJvcGVuSWQiOm51bGwsInV1aWQiOiI4Zjg4NmQ3ZS04YmU0LTQzODYtYTRjNi1hNjAyZjg5MmU2OWIiLCJlbWFpbCI6IiIsImV4cCI6MTc4NTkwMjE2Mn0.dN7SGOJiTpVGPsuDQR1LveOpbXqLUysi9RJA6y7i6xkTukqKJOxfoquGqPTsB-7VE7GrmRNYiCztGB2pmezF6A"
+DEFAULT_MINERU_API_URL = "https://37cb31.xhang.buaa.edu.cn:52811"
+DEFAULT_REQUEST_TIMEOUT = 15.0
+DEFAULT_PARSE_TIMEOUT = 110.0
+DEFAULT_POLL_INTERVAL = 2.0
+
+
+def _env_float(name: str, default: float) -> float:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        return default
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _nested_value(payload: Any, key: str) -> Any:
+    if not isinstance(payload, dict):
+        return None
+    if key in payload:
+        return payload[key]
+    data = payload.get("data")
+    if isinstance(data, dict):
+        return data.get(key)
+    return None
+
 
 class MinerUService:
-    def __init__(self, api_token: str = MINERU_API_TOKEN):
-        self.api_token = api_token
-        self.base_url = "https://mineru.net/api/v4"
+    """Submit a PDF directly to the deployed MinerU Router and read Markdown."""
+
+    def __init__(
+        self,
+        api_url: Optional[str] = None,
+        timeout: Optional[float] = None,
+        verify_ssl: Optional[bool] = None,
+        parse_timeout: Optional[float] = None,
+        poll_interval: Optional[float] = None,
+    ) -> None:
+        self.base_url = (
+            api_url or os.getenv("MINERU_API_URL") or DEFAULT_MINERU_API_URL
+        ).rstrip("/")
+        # Keep api_url as an alias for compatibility with existing callers/tests.
+        self.api_url = self.base_url
+        self.request_timeout = (
+            timeout
+            if timeout is not None
+            else _env_float("MINERU_REQUEST_TIMEOUT", DEFAULT_REQUEST_TIMEOUT)
+        )
+        self.parse_timeout = (
+            parse_timeout
+            if parse_timeout is not None
+            else _env_float("MINERU_PARSE_TIMEOUT", DEFAULT_PARSE_TIMEOUT)
+        )
+        self.poll_interval = (
+            poll_interval
+            if poll_interval is not None
+            else _env_float("MINERU_POLL_INTERVAL", DEFAULT_POLL_INTERVAL)
+        )
+        self.verify_ssl = (
+            _env_bool("MINERU_VERIFY_SSL", False)
+            if verify_ssl is None
+            else verify_ssl
+        )
 
     def parse_pdf_to_markdown(self, pdf_path: str) -> Optional[str]:
-        """解析PDF文件为Markdown内容
+        """Parse one PDF through MinerU Router's asynchronous task API."""
+        path = Path(pdf_path)
+        if not path.is_file():
+            print(f"[MinerU] PDF does not exist: {path}")
+            return None
 
-        Args:
-            pdf_path: PDF文件路径
+        task_id = self._submit_task(path)
+        if not task_id:
+            return None
 
-        Returns:
-            Markdown内容字符串，失败返回None
-        """
+        status_payload = self._wait_for_task(task_id, path.name)
+        if status_payload is None:
+            return None
+
+        result = self._get_task_result(task_id, path.name)
+        if not result:
+            return None
+
+        print(f"[MinerU] parsed {path.name}, chars={len(result)}")
+        return result
+
+    def _submit_task(self, path: Path) -> Optional[str]:
+        endpoint = f"{self.base_url}/tasks"
         try:
-            file_name = os.path.basename(pdf_path)
-
-            upload_info = self._get_upload_urls([file_name])
-            if not upload_info:
-                print(f"[MinerU] 获取上传URL失败: {file_name}")
-                return None
-
-            batch_id = upload_info["batch_id"]
-            upload_urls = upload_info["file_urls"]
-
-            upload_success = self._upload_file(pdf_path, upload_urls[0])
-            if not upload_success:
-                print(f"[MinerU] 上传失败: {file_name}")
-                return None
-
-            result = self._wait_for_completion(batch_id)
-            if not result:
-                print(f"[MinerU] 解析失败或超时: {file_name}")
-                return None
-
-            markdown_content = self._extract_markdown(result)
-            if markdown_content:
-                print(f"[MinerU] 解析成功: {file_name}")
-            return markdown_content
-
-        except Exception as e:
-            print(f"[MinerU] 解析异常: {e}")
+            with path.open("rb") as file_obj:
+                response = requests.post(
+                    endpoint,
+                    files={
+                        "files": (path.name, file_obj, "application/pdf")
+                    },
+                    timeout=self.request_timeout,
+                    verify=self.verify_ssl,
+                )
+        except requests.RequestException as exc:
+            print(f"[MinerU] task submission failed for {path.name}: {exc}")
+            return None
+        except OSError as exc:
+            print(f"[MinerU] could not read {path.name}: {exc}")
             return None
 
-    def _get_upload_urls(self, file_names: list) -> Optional[dict]:
-        url = f"{self.base_url}/file-urls/batch"
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_token}"
-        }
-
-        files_data = []
-        for file_name in file_names:
-            files_data.append({
-                "name": file_name,
-                "data_id": file_name.split('.')[0]
-            })
-
-        data = {"files": files_data, "model_version": "vlm"}
-
-        try:
-            response = requests.post(url, headers=headers, json=data, timeout=30)
-            if response.status_code == 200:
-                result = response.json()
-                if result.get("code") == 0:
-                    return {
-                        "batch_id": result["data"]["batch_id"],
-                        "file_urls": result["data"]["file_urls"]
-                    }
-                else:
-                    print(f"[MinerU] 获取URL失败: {result.get('msg', '未知错误')}")
-            return None
-        except Exception as e:
-            print(f"[MinerU] 获取URL异常: {e}")
+        payload = self._json_or_none(response, f"submit {path.name}")
+        if payload is None:
             return None
 
-    def _upload_file(self, file_path: str, upload_url: str) -> bool:
-        try:
-            with open(file_path, 'rb') as f:
-                response = requests.put(upload_url, data=f, timeout=120)
-                return response.status_code == 200
-        except Exception as e:
-            print(f"[MinerU] 上传异常: {e}")
-            return False
-
-    def _wait_for_completion(self, batch_id: str, check_interval: int = 10, timeout: int = 600) -> Optional[dict]:
-        start_time = time.time()
-
-        while time.time() - start_time < timeout:
-            status = self._get_batch_status(batch_id)
-            if status is None:
-                return None
-
-            extract_result = status.get("extract_result", [])
-            if not extract_result:
-                time.sleep(check_interval)
-                continue
-
-            states = [item.get("state", "") for item in extract_result]
-            overall_state = states[0] if states else ""
-            print(f"[MinerU] 当前状态: {overall_state}")
-
-            if overall_state in ["done", "completed"]:
-                return status
-            elif overall_state == "failed":
-                return None
-            else:
-                time.sleep(check_interval)
-
-        return None
-
-    def _get_batch_status(self, batch_id: str) -> Optional[dict]:
-        url = f"{self.base_url}/extract-results/batch/{batch_id}"
-        headers = {"Authorization": f"Bearer {self.api_token}"}
-
-        try:
-            response = requests.get(url, headers=headers, timeout=30)
-            if response.status_code == 200:
-                result = response.json()
-                if result.get("code") == 0:
-                    return result["data"]
-            return None
-        except Exception as e:
-            print(f"[MinerU] 获取状态异常: {e}")
+        task_id = _nested_value(payload, "task_id") or _nested_value(
+            payload, "id"
+        )
+        if not task_id:
+            print(f"[MinerU] task submission returned no task_id for {path.name}")
             return None
 
-    def _extract_markdown(self, result: dict) -> Optional[str]:
-        extract_result = result.get("extract_result", [])
-        if not extract_result:
-            return None
+        task_id = str(task_id)
+        print(f"[MinerU] submitted {path.name}, task_id={task_id}")
+        return task_id
 
-        for item in extract_result:
-            zip_url = item.get("full_zip_url")
-            if zip_url:
-                import tempfile
-                with tempfile.TemporaryDirectory() as temp_dir:
-                    zip_path = Path(temp_dir) / "result.zip"
+    def _wait_for_task(
+        self, task_id: str, file_name: str
+    ) -> Optional[dict[str, Any]]:
+        endpoint = f"{self.base_url}/tasks/{task_id}"
+        deadline = time.monotonic() + self.parse_timeout
+        last_status = "unknown"
 
-                    if self._download_with_retry(zip_url, zip_path):
-                        try:
-                            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                                zip_ref.extractall(temp_dir)
-
-                            md_files = list(Path(temp_dir).glob("*.md"))
-                            if md_files:
-                                with open(md_files[0], 'r', encoding='utf-8') as f:
-                                    return f.read()
-
-                            nested_md = list(Path(temp_dir).rglob("*.md"))
-                            if nested_md:
-                                with open(nested_md[0], 'r', encoding='utf-8') as f:
-                                    return f.read()
-                        except Exception as e:
-                            print(f"[MinerU] 解压异常: {e}")
-
-        return None
-
-    def _download_with_retry(self, url: str, output_path: Path, max_retries: int = 3) -> bool:
-        for attempt in range(max_retries):
+        while time.monotonic() <= deadline:
             try:
-                response = requests.get(url, timeout=180)
-                if response.status_code == 200:
-                    with open(output_path, 'wb') as f:
-                        f.write(response.content)
-                    return True
-            except Exception as e:
-                if "cdn-mineru.openxlab.org.cn" in url:
-                    try:
-                        response = requests.get(url, timeout=180, verify=False)
-                        if response.status_code == 200:
-                            with open(output_path, 'wb') as f:
-                                f.write(response.content)
-                            return True
-                    except Exception:
-                        pass
-                    try:
-                        curl_cmd = [
-                            "curl.exe", "-k", "-L", "--silent", "--show-error",
-                            "--connect-timeout", "30", "--max-time", "180",
-                            "-o", str(output_path), url
-                        ]
-                        curl_result = subprocess.run(curl_cmd, check=False, capture_output=True, text=True)
-                        if curl_result.returncode == 0 and output_path.exists() and output_path.stat().st_size > 0:
-                            return True
-                    except Exception:
-                        pass
+                response = requests.get(
+                    endpoint,
+                    timeout=self.request_timeout,
+                    verify=self.verify_ssl,
+                )
+            except requests.RequestException as exc:
+                print(f"[MinerU] task status failed for {file_name}: {exc}")
+                return None
 
-            if attempt < max_retries - 1:
-                time.sleep(5)
+            payload = self._json_or_none(response, f"status {task_id}")
+            if payload is None:
+                return None
 
-        return False
+            raw_status = _nested_value(payload, "status")
+            status = str(raw_status or "").strip().lower()
+            last_status = status or last_status
+
+            if status in {"completed", "done", "success", "succeeded"}:
+                return payload
+            if status in {
+                "failed",
+                "failure",
+                "error",
+                "cancelled",
+                "canceled",
+            }:
+                detail = _nested_value(payload, "error") or _nested_value(
+                    payload, "message"
+                )
+                print(
+                    f"[MinerU] task failed for {file_name}: "
+                    f"status={status} detail={detail or 'unknown'}"
+                )
+                return None
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(self.poll_interval, remaining))
+
+        print(
+            f"[MinerU] task timed out for {file_name}: "
+            f"task_id={task_id} status={last_status} "
+            f"timeout={self.parse_timeout}s"
+        )
+        return None
+
+    def _get_task_result(
+        self, task_id: str, file_name: str
+    ) -> Optional[str]:
+        endpoint = f"{self.base_url}/tasks/{task_id}/result"
+        try:
+            response = requests.get(
+                endpoint,
+                timeout=self.request_timeout,
+                verify=self.verify_ssl,
+            )
+        except requests.RequestException as exc:
+            print(f"[MinerU] result request failed for {file_name}: {exc}")
+            return None
+
+        payload = self._json_or_none(response, f"result {task_id}")
+        if payload is None:
+            return None
+
+        content = self._extract_markdown(payload, file_name)
+        if not content:
+            print(f"[MinerU] empty parsed content for {file_name}")
+            return None
+        return content.strip()
+
+    @staticmethod
+    def _json_or_none(response: Any, operation: str) -> Optional[dict[str, Any]]:
+        if not 200 <= response.status_code < 300:
+            detail = getattr(response, "text", "")[:300].replace("\n", " ")
+            print(
+                f"[MinerU] HTTP {response.status_code} during {operation}: "
+                f"{detail}"
+            )
+            return None
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            print(f"[MinerU] invalid JSON during {operation}: {exc}")
+            return None
+        if not isinstance(payload, dict):
+            print(f"[MinerU] unexpected response during {operation}")
+            return None
+        return payload
+
+    @staticmethod
+    def _extract_markdown(payload: dict[str, Any], file_name: str) -> Optional[str]:
+        results = payload.get("results")
+        if not isinstance(results, dict):
+            data = payload.get("data")
+            results = data.get("results") if isinstance(data, dict) else None
+
+        if isinstance(results, dict):
+            stem = Path(file_name).stem
+            candidates = [stem, file_name]
+            for key in candidates:
+                item = results.get(key)
+                content = MinerUService._content_from_result(item)
+                if content:
+                    return content
+
+            if len(results) == 1:
+                content = MinerUService._content_from_result(
+                    next(iter(results.values()))
+                )
+                if content:
+                    return content
+
+        return MinerUService._content_from_result(payload)
+
+    @staticmethod
+    def _content_from_result(value: Any) -> Optional[str]:
+        if isinstance(value, str):
+            return value.strip() or None
+        if isinstance(value, dict):
+            for key in ("md_content", "markdown", "content", "parsed_content"):
+                content = value.get(key)
+                if isinstance(content, str) and content.strip():
+                    return content.strip()
+        return None
 
 
 mineru_service = MinerUService()
