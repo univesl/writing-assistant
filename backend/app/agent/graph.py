@@ -6,6 +6,7 @@ import os
 import re
 import time
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from typing import Any, Awaitable, Callable
 
 from langgraph.graph import END, START, StateGraph
@@ -47,6 +48,28 @@ _GENERIC_SOURCE_TERMS = {
     "查找", "查询", "包括", "相关", "方面", "进行", "获取", "了解", "特别",
     "重点", "安全", "文件", "实施", "细则", "建设",
 }
+_STRONG_BASE_REVISION_SIGNALS = (
+    "原文", "底稿", "最小改", "最小替换", "尽量使用",
+    "只有提到修改", "只改", "改的地方再改", "变更清单", "局部替换",
+)
+_WEAK_BASE_REVISION_SIGNALS = (
+    "沿用", "保留",
+)
+_LAZY_REFERENCE_RE = re.compile(
+    r"(继续按照|参照|按)(?:第[一二三四五六七八九十百0-9]+届|上届|原)(?:[^。；\n]{0,20})(?:通知|执行|办理|要求)"
+)
+_PLACEHOLDER_RE = re.compile(r"待补充|待定|待明确|〔待补充〕|\[待补充")
+_SECTION_HEADING_RE = re.compile(
+    r"(?m)^\s*(?:#{1,6}\s*)?(?P<num>[一二三四五六七八九十百]+)、(?P<title>[^\n#]+?)\s*$"
+)
+_CHINESE_DIGITS = {
+    "零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4,
+    "五": 5, "六": 6, "七": 7, "八": 8, "九": 9,
+}
+_REQUIRED_REFERENCE_SECTIONS = (
+    "指导思想", "组织机构", "时间安排", "申报工作", "评审工作", "交流活动", "工作要求",
+)
+_STABLE_REFERENCE_SECTIONS = ("指导思想", "评审工作", "交流活动", "工作要求")
 
 
 class AgentCancelled(asyncio.CancelledError):
@@ -234,6 +257,340 @@ def _normalize_material_roles(roles: list[str]) -> list[str]:
 
 def _normalize_text(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
+def _issue(code: str, message: str, severity: str = "warning", suggestion: str = "") -> dict[str, Any]:
+    return {
+        "code": code,
+        "severity": severity,
+        "message": message,
+        "suggestion": suggestion,
+        "source": "reference_base_linter",
+    }
+
+
+def _chinese_number_to_int(value: str) -> int | None:
+    text = (value or "").strip()
+    if not text:
+        return None
+    if text.isdigit():
+        return int(text)
+    total = 0
+    current = 0
+    for char in text:
+        if char == "百":
+            current = max(current, 1) * 100
+            total += current
+            current = 0
+        elif char == "十":
+            current = max(current, 1) * 10
+            total += current
+            current = 0
+        elif char in _CHINESE_DIGITS:
+            current = _CHINESE_DIGITS[char]
+        else:
+            return None
+    return total + current
+
+
+def _edition_number(value: Any) -> int | None:
+    match = re.search(r"第([一二三四五六七八九十百两0-9]+)届", str(value or ""))
+    return _chinese_number_to_int(match.group(1)) if match else None
+
+
+def _infer_reference_mode(requirements: str, source_materials: list[dict[str, Any]]) -> str:
+    if not source_materials:
+        return "synthesize"
+    text = _normalize_text(requirements)
+    has_strong_revision_signal = any(signal in text for signal in _STRONG_BASE_REVISION_SIGNALS)
+    has_weak_revision_signal = any(signal in text for signal in _WEAK_BASE_REVISION_SIGNALS)
+    material_editions = [
+        edition for item in source_materials
+        if (edition := _edition_number(item.get("filename"))) is not None
+    ]
+    target_edition = _edition_number(text)
+    generation_signal = any(term in text for term in ("生成", "新版", "这一届", "本届", "新一版"))
+    consecutive_materials = len(material_editions) >= 2 or (
+        target_edition is not None and any(edition < target_edition for edition in material_editions)
+    )
+    if has_strong_revision_signal or (generation_signal and consecutive_materials):
+        return "base_revision"
+    if has_weak_revision_signal and consecutive_materials:
+        return "base_revision"
+    return "synthesize"
+
+
+def _select_reference_base_material(
+    requirements: str,
+    source_materials: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    if not source_materials:
+        return None
+    target_edition = _edition_number(requirements)
+    scored = []
+    for index, material in enumerate(source_materials):
+        filename = str(material.get("filename") or "")
+        edition = _edition_number(filename)
+        if edition is None:
+            score = 0
+        elif target_edition is not None and edition < target_edition:
+            score = 1000 + edition
+        elif target_edition is None:
+            score = 500 + edition
+        else:
+            score = 100
+        if "第三十五届" in filename:
+            score += 50
+        scored.append((score, -index, material))
+    scored.sort(reverse=True, key=lambda item: (item[0], item[1]))
+    return scored[0][2]
+
+
+def _material_content_by_id(source_materials: list[dict[str, Any]]) -> dict[int, str]:
+    return {
+        int(item.get("file_id") or 0): str(item.get("content") or "")
+        for item in source_materials
+        if item.get("file_id")
+    }
+
+
+def _normalize_reference_base_revision(
+    state: WritingState,
+    writing_plan: dict[str, Any],
+    material_cards: list[dict[str, Any]],
+    strategy: dict[str, Any],
+) -> dict[str, Any]:
+    if state.get("task_type") != "reference":
+        return {
+            "reference_mode": "synthesize",
+            "material_cards": material_cards,
+            "reference_strategy": strategy,
+        }
+    materials = list(state.get("source_materials") or [])
+    reference_mode = _infer_reference_mode(str(state.get("requirements") or ""), materials)
+    if reference_mode != "base_revision":
+        return {
+            "reference_mode": "synthesize",
+            "material_cards": material_cards,
+            "reference_strategy": strategy,
+        }
+
+    base_material = _select_reference_base_material(str(state.get("requirements") or ""), materials)
+    if not base_material:
+        return {
+            "reference_mode": "synthesize",
+            "material_cards": material_cards,
+            "reference_strategy": strategy,
+        }
+    base_file_id = int(base_material.get("file_id") or 0)
+    content_by_id = _material_content_by_id(materials)
+    base_text = content_by_id.get(base_file_id, "")
+    cards_by_id = {
+        int(card.get("file_id") or 0): dict(card)
+        for card in material_cards or []
+        if card.get("file_id")
+    }
+    for material in materials:
+        file_id = int(material.get("file_id") or 0)
+        if not file_id:
+            continue
+        card = cards_by_id.setdefault(file_id, {
+            "file_id": file_id,
+            "filename": material.get("filename", "未命名"),
+            "content_excerpts": [],
+            "structure_functions": [],
+            "style_traits": [],
+        })
+        card.setdefault("filename", material.get("filename", "未命名"))
+        if file_id == base_file_id:
+            card["content_excerpts"] = [base_text] if base_text else []
+            card.setdefault("structure_functions", [])
+            card.setdefault("style_traits", [])
+
+    raw_plans = strategy.get("material_plans") if isinstance(strategy, dict) else []
+    plans_by_id = {
+        int(plan.get("file_id") or 0): dict(plan)
+        for plan in raw_plans or []
+        if isinstance(plan, dict) and plan.get("file_id")
+    }
+    source_bindings = []
+    supporting_ids = []
+    for material in materials:
+        file_id = int(material.get("file_id") or 0)
+        if not file_id:
+            continue
+        plan = plans_by_id.setdefault(file_id, {
+            "file_id": file_id,
+            "roles": [],
+            "priority": "supporting",
+            "use_scope": "",
+            "required_points": [],
+            "excluded_points": [],
+        })
+        if file_id == base_file_id:
+            roles = [
+                role for role in _normalize_material_roles(plan.get("roles") or [])
+                if role != "irrelevant"
+            ]
+            roles = list(dict.fromkeys([*roles, "content", "structure", "style"]))
+            plan.update({
+                "roles": roles,
+                "priority": "primary",
+                "use_scope": "作为参考写作的主底稿全文使用；未明确变更处默认保留原文",
+            })
+            binding_role = "base_template"
+        else:
+            roles = _normalize_material_roles(plan.get("roles") or []) or ["structure", "style"]
+            plan.update({
+                "roles": roles,
+                "priority": plan.get("priority") if plan.get("priority") in {"primary", "supporting", "background"} else "supporting",
+                "use_scope": plan.get("use_scope") or "仅辅助判断结构、风格或差异，不直接覆盖主底稿事实",
+            })
+            binding_role = "style_reference" if any(role in roles for role in ("structure", "style")) else "background"
+            supporting_ids.append(file_id)
+        source_bindings.append({
+            "file_id": file_id,
+            "role": binding_role,
+            "priority": plan["priority"],
+            "pass_full_text": file_id == base_file_id,
+            "allowed_fact_scope": ["主底稿全文"] if file_id == base_file_id else ["结构", "风格"],
+        })
+    normalized_strategy = dict(strategy or {})
+    normalized_strategy["target_document_type"] = normalized_strategy.get("target_document_type") or state.get("document_type", "general")
+    normalized_strategy["material_plans"] = list(plans_by_id.values())
+    normalized_strategy["reference_mode"] = reference_mode
+    normalized_strategy["reference_base_file_id"] = base_file_id
+    writing_plan["material_cards"] = list(cards_by_id.values())
+    writing_plan["reference_strategy"] = normalized_strategy
+    return {
+        "reference_mode": reference_mode,
+        "reference_base_file_id": base_file_id,
+        "reference_base_text": base_text,
+        "reference_supporting_file_ids": supporting_ids,
+        "source_bindings": source_bindings,
+        "material_cards": list(cards_by_id.values()),
+        "reference_strategy": normalized_strategy,
+    }
+
+
+def _extract_section_map(text: str) -> dict[str, str]:
+    matches = list(_SECTION_HEADING_RE.finditer(text or ""))
+    sections: dict[str, str] = {}
+    for index, match in enumerate(matches):
+        title = match.group("title").strip()
+        start = match.start()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        sections[title] = text[start:end].strip()
+    return sections
+
+
+def _attachment_count(text: str) -> int:
+    attachment_index = (text or "").find("附件")
+    scope = text[attachment_index:] if attachment_index >= 0 else text or ""
+    return len(re.findall(r"(?m)^\s*\d+[.、]\s*", scope))
+
+
+def _normalize_for_similarity(text: str) -> str:
+    normalized = re.sub(r"\s+", "", text or "")
+    normalized = re.sub(r"第[一二三四五六七八九十百两0-9]+届", "第X届", normalized)
+    normalized = re.sub(r"20\d{2}年\d{1,2}月\d{1,2}日?", "X年X月X日", normalized)
+    return normalized
+
+
+def _section_similarity(left: str, right: str) -> float:
+    return SequenceMatcher(
+        None,
+        _normalize_for_similarity(left),
+        _normalize_for_similarity(right),
+    ).ratio()
+
+
+def _lint_reference_base_revision(state: WritingState) -> list[dict[str, Any]]:
+    if state.get("task_type") != "reference" or state.get("reference_mode") != "base_revision":
+        return []
+    base_text = str(state.get("reference_base_text") or "")
+    draft_text = str(state.get("draft") or "")
+    requirements = str(state.get("requirements") or "")
+    if not base_text or not draft_text:
+        return []
+    issues: list[dict[str, Any]] = []
+    missing = [heading for heading in _REQUIRED_REFERENCE_SECTIONS if heading not in draft_text]
+    if missing:
+        issues.append(_issue(
+            "reference_base_sections_missing",
+            f"底稿修订式参考写作缺少主底稿中的章节：{'、'.join(missing)}",
+            "error",
+            "补回主底稿章节，未明确变更处保留原文",
+        ))
+    if "关于举办" in draft_text and "关于启动" in base_text:
+        issues.append(_issue(
+            "reference_base_title_changed",
+            "标题用语由主底稿的“关于启动”误改为“关于举办”",
+            "error",
+            "恢复主底稿标题用语，仅替换届次等变量",
+        ))
+    if _LAZY_REFERENCE_RE.search(draft_text):
+        issues.append(_issue(
+            "reference_base_lazy_inheritance",
+            "正文用“继续按照/参照/按上届执行”等概括句替代了主底稿具体内容",
+            "error",
+            "展开并保留主底稿对应章节的具体表述",
+        ))
+    if _PLACEHOLDER_RE.search(draft_text):
+        issues.append(_issue(
+            "reference_base_placeholder",
+            "底稿修订式参考写作中出现待补充或待定占位",
+            "error",
+            "能从主底稿或用户变更清单确定的字段不得改成占位",
+        ))
+    if (
+        len(draft_text) < len(base_text) * 0.85
+        and not _allows_substantial_shortening(requirements)
+    ):
+        issues.append(_issue(
+            "reference_base_length_short",
+            "输出明显短于主底稿，可能发生了摘要化或漏段",
+            "error",
+            "以主底稿全文为基础补回未变更段落",
+        ))
+    base_attachments = _attachment_count(base_text)
+    draft_attachments = _attachment_count(draft_text)
+    if (
+        base_attachments
+        and draft_attachments < base_attachments
+        and not re.search(r"删除|删去|减少|精简附件", requirements)
+    ):
+        issues.append(_issue(
+            "reference_base_attachments_missing",
+            f"附件数量少于主底稿（主底稿 {base_attachments} 项，当前 {draft_attachments} 项）",
+            "error",
+            "在主底稿附件清单基础上替换或追加，不要只列新增附件",
+        ))
+    base_sections = _extract_section_map(base_text)
+    draft_sections = _extract_section_map(draft_text)
+    for heading in _STABLE_REFERENCE_SECTIONS:
+        if heading not in base_sections or heading not in draft_sections:
+            continue
+        similarity = _section_similarity(base_sections[heading], draft_sections[heading])
+        if similarity < 0.65:
+            issues.append(_issue(
+                f"reference_base_{heading}_rewritten",
+                f"“{heading}”章节与主底稿差异过大，疑似被概括重写",
+                "error",
+                "未明确要求修改的稳定章节应保留主底稿原文，只做必要变量替换",
+            ))
+    return issues
+
+
+def _reference_base_guard_issues(base_text: str, candidate: str, requirements: str) -> list[dict[str, Any]]:
+    state: WritingState = {
+        "task_type": "reference",
+        "reference_mode": "base_revision",
+        "reference_base_text": base_text,
+        "draft": candidate,
+        "requirements": requirements,
+    }
+    return _lint_reference_base_revision(state)
 
 
 def _normalize_tasks(plan: RetrievalPlan) -> list[dict[str, Any]]:
@@ -467,10 +824,16 @@ def build_writing_graph(context: AgentExecutionContext):
                 "material_issues": [],
                 "material_cards": [],
                 "reference_strategy": {},
+                "reference_mode": "synthesize",
+                "reference_base_file_id": None,
+                "reference_base_text": "",
+                "reference_supporting_file_ids": [],
+                "source_bindings": [],
                 "writing_plan": {},
                 "selection_replacement": "",
                 "revision_count": int(state.get("revision_count") or 0),
                 "outline": {},
+                "quality_gate": {},
                 "use_web_search": bool(state.get("use_web_search")),
                 "draft": state.get("base_article", "")
                 if state.get("task_type") in {"review", "format"}
@@ -876,6 +1239,18 @@ def build_writing_graph(context: AgentExecutionContext):
                     warning = {"code": "reference_plan_partial", "message": "材料画像字段不完整，已采用保守材料边界"}
                     warnings.append(warning)
                     await context.emit("warning", warning, "planning")
+                reference_updates = _normalize_reference_base_revision(
+                    state, writing_plan, material_cards, strategy
+                )
+                material_cards = reference_updates["material_cards"]
+                strategy = reference_updates["reference_strategy"]
+                if reference_updates.get("reference_mode") == "base_revision":
+                    notice = {
+                        "code": "reference_base_revision_mode",
+                        "message": "已识别为主底稿修订式参考写作，主底稿全文将进入起草阶段",
+                    }
+                    warnings.append(notice)
+                    await context.emit("warning", notice, "planning")
                 material_plans = {
                     int(item.get("file_id")): item
                     for item in strategy.get("material_plans") or []
@@ -972,26 +1347,35 @@ def build_writing_graph(context: AgentExecutionContext):
                         task["backend"] = "kng"
                 if len(tasks) > MAX_KNG_QUERIES + MAX_WEB_QUERIES:
                     tasks = _merge_task_budget(tasks)
+                workflow_plan = {"material_plan": {
+                    "reference_mode": reference_updates.get("reference_mode", "synthesize"),
+                    "reference_base_file_id": reference_updates.get("reference_base_file_id"),
+                    "source_bindings": reference_updates.get("source_bindings", []),
+                    "materials": [
+                        {
+                            "file_id": int(item.get("file_id") or 0),
+                            "name": str(item.get("filename") or "未命名"),
+                            "roles": _normalize_material_roles(
+                                material_plans.get(int(item.get("file_id") or 0), {}).get("roles") or []
+                            ),
+                            "priority": material_plans.get(int(item.get("file_id") or 0), {}).get("priority", "supporting"),
+                        }
+                        for item in material_cards
+                    ],
+                }}
                 return {
                     "writing_plan": writing_plan,
                     "material_cards": material_cards,
                     "reference_strategy": strategy,
+                    "reference_mode": reference_updates.get("reference_mode", "synthesize"),
+                    "reference_base_file_id": reference_updates.get("reference_base_file_id"),
+                    "reference_base_text": reference_updates.get("reference_base_text", ""),
+                    "reference_supporting_file_ids": reference_updates.get("reference_supporting_file_ids", []),
+                    "source_bindings": reference_updates.get("source_bindings", []),
                     "retrieval_plan": tasks,
                     "evidence": uploaded_evidence,
                     "references": uploaded_references,
-                    "workflow_plan": {"material_plan": {
-                        "materials": [
-                            {
-                                "file_id": int(item.get("file_id") or 0),
-                                "name": str(item.get("filename") or "未命名"),
-                                "roles": _normalize_material_roles(
-                                    material_plans.get(int(item.get("file_id") or 0), {}).get("roles") or []
-                                ),
-                                "priority": material_plans.get(int(item.get("file_id") or 0), {}).get("priority", "supporting"),
-                            }
-                            for item in material_cards
-                        ],
-                    }},
+                    "workflow_plan": workflow_plan,
                     "warnings": warnings,
                 }
             except Exception:
@@ -1003,6 +1387,24 @@ def build_writing_graph(context: AgentExecutionContext):
                 warnings.append(warning)
                 await context.emit("warning", warning, "planning")
                 fallback_cards, fallback_strategy = _fallback_material_plan(state)
+                writing_plan = {
+                    "document_subtype": "",
+                    "purpose": state.get("requirements", ""),
+                    "audience": "",
+                    "confirmed_facts": [],
+                    "must_cover": [],
+                    "exclusions": [],
+                    "missing_information": [],
+                    "tone": "",
+                    "structure_strategy": "由内容决定结构",
+                    "material_cards": fallback_cards,
+                    "reference_strategy": fallback_strategy,
+                }
+                reference_updates = _normalize_reference_base_revision(
+                    state, writing_plan, fallback_cards, fallback_strategy
+                )
+                fallback_cards = reference_updates["material_cards"]
+                fallback_strategy = reference_updates["reference_strategy"]
                 fallback_plans = {
                     int(item.get("file_id")): item
                     for item in fallback_strategy.get("material_plans") or []
@@ -1025,22 +1427,22 @@ def build_writing_graph(context: AgentExecutionContext):
                         "kind": "uploaded_file", "file_id": file_id, "name": card.get("filename", "未命名")
                     })
                 return {
-                    "writing_plan": {
-                        "document_subtype": "",
-                        "purpose": state.get("requirements", ""),
-                        "audience": "",
-                        "confirmed_facts": [],
-                        "must_cover": [],
-                        "exclusions": [],
-                        "missing_information": [],
-                        "tone": "",
-                        "structure_strategy": "由内容决定结构",
-                    },
+                    "writing_plan": writing_plan,
                     "material_cards": fallback_cards,
                     "reference_strategy": fallback_strategy,
+                    "reference_mode": reference_updates.get("reference_mode", "synthesize"),
+                    "reference_base_file_id": reference_updates.get("reference_base_file_id"),
+                    "reference_base_text": reference_updates.get("reference_base_text", ""),
+                    "reference_supporting_file_ids": reference_updates.get("reference_supporting_file_ids", []),
+                    "source_bindings": reference_updates.get("source_bindings", []),
                     "retrieval_plan": [],
                     "evidence": fallback_evidence,
                     "references": fallback_references,
+                    "workflow_plan": {"material_plan": {
+                        "reference_mode": reference_updates.get("reference_mode", "synthesize"),
+                        "reference_base_file_id": reference_updates.get("reference_base_file_id"),
+                        "source_bindings": reference_updates.get("source_bindings", []),
+                    }},
                     "warnings": warnings,
                 }
 
@@ -1326,21 +1728,39 @@ def build_writing_graph(context: AgentExecutionContext):
     async def draft(state: WritingState):
         async def operation():
             task_type = state.get("task_type", "draft")
-            task_instruction = {
-                "quick": "从零起草一份中文公文。",
-                "draft": "从零起草一份中文公文。",
-                "reference": "按照材料使用方案起草一篇新的公文，不得把多份材料拼成摘要。",
-                "reply": "针对上传来文逐项作出边界清楚的正式回复。",
-                "imitate": "按统一参考写作流程处理；优先借鉴规划指定的结构和文风，事实仍只来自允许的内容来源。",
-                "revise_document": "按照用户要求修订现有全文，保留未要求修改的正确内容。",
-                "revise_selection": "只改写指定选区，输出选区的替换文本。",
-            }.get(task_type, "完成当前中文公文写作任务。")
+            if task_type == "reference" and state.get("reference_mode") == "base_revision":
+                task_instruction = (
+                    "以【主底稿全文】为基础进行修订。主底稿是本次参考写作的可信正文底稿；"
+                    "输出必须是一篇完整正文，未被用户明确要求修改的段落、句式、附件项和版记默认保留。"
+                    "不要概括、不要重写、不要只写变更项。"
+                )
+            else:
+                task_instruction = {
+                    "quick": "从零起草一份中文公文。",
+                    "draft": "从零起草一份中文公文。",
+                    "reference": "按照材料使用方案起草一篇新的公文，不得把多份材料拼成摘要。",
+                    "reply": "针对上传来文逐项作出边界清楚的正式回复。",
+                    "imitate": "按统一参考写作流程处理；优先借鉴规划指定的结构和文风，事实仍只来自允许的内容来源。",
+                    "revise_document": "按照用户要求修订现有全文，保留未要求修改的正确内容。",
+                    "revise_selection": "只改写指定选区，输出选区的替换文本。",
+                }.get(task_type, "完成当前中文公文写作任务。")
+            base_revision_context = ""
+            if task_type == "reference" and state.get("reference_mode") == "base_revision":
+                base_revision_context = (
+                    "【参考写作内部模式：主底稿修订】\n"
+                    "本模式下，写作依据优先级中的“旧稿默认不作为新稿事实”不适用于主底稿；"
+                    "主底稿全文是用户要求沿用和局部替换的正文基础。除用户明确变更点外，"
+                    "不得把主底稿具体段落改写成摘要。\n\n"
+                    f"主底稿文件ID：{state.get('reference_base_file_id')}\n"
+                    f"主底稿全文：\n{state.get('reference_base_text', '')}\n\n"
+                )
             prompt = (
                 f"{task_instruction}严格遵循 Skill，只使用用户要求和证据中的事实。"
                 "缺失信息不要猜测。只输出 Markdown，不输出说明。\n\n"
                 f"文种：{state['document_type']}\n用户要求：{state.get('requirements', '')}\n\n"
                 f"写作规划：{_draft_plan_text(state)}\n\n"
                 f"材料使用方案：{_reference_strategy_text(state)}\n\n"
+                f"{base_revision_context}"
                 f"{WRITING_SOURCE_RULES}\n\n"
                 f"{KNG_USAGE_RULES}\n\n"
                 f"Skill：\n{_skill_text(state, 'draft')}\n\n已筛选证据：\n{_evidence_text(state)}\n\n"
@@ -1427,6 +1847,8 @@ def build_writing_graph(context: AgentExecutionContext):
             deterministic = [] if selection_task else lint_document(
                 state["document_type"], state.get("requirements", ""), state.get("draft", "")
             )
+            if not selection_task:
+                deterministic.extend(_lint_reference_base_revision(state))
             review_target = (
                 state.get("selection_replacement", "") if selection_task else state.get("draft", "")
             )
@@ -1525,6 +1947,33 @@ def build_writing_graph(context: AgentExecutionContext):
                 })
             revision_count = int(state.get("revision_count") or 0) + 1
             if (
+                state.get("task_type") == "reference"
+                and state.get("reference_mode") == "base_revision"
+                and state.get("reference_base_text")
+            ):
+                base_text = str(state.get("reference_base_text") or "")
+                original_guard = _reference_base_guard_issues(
+                    base_text, original, state.get("requirements", "")
+                )
+                revised_guard = _reference_base_guard_issues(
+                    base_text, revised, state.get("requirements", "")
+                )
+                original_errors = sum(1 for item in original_guard if item.get("severity") == "error")
+                revised_errors = sum(1 for item in revised_guard if item.get("severity") == "error")
+                if revised_errors > original_errors:
+                    warning = {
+                        "code": "revision_rejected_reference_base_regression",
+                        "message": "修订稿相对主底稿的完整性更差，已保留上一版正文",
+                    }
+                    if not any(item.get("code") == warning["code"] for item in warnings):
+                        warnings.append(warning)
+                        await context.emit("warning", warning, "revision")
+                    return {
+                        "draft": original,
+                        "warnings": warnings,
+                        "revision_count": revision_count,
+                    }
+            if (
                 original
                 and len(revised) < len(original) * 0.7
                 and not _allows_substantial_shortening(state.get("requirements", ""))
@@ -1554,6 +2003,7 @@ def build_writing_graph(context: AgentExecutionContext):
         async def operation():
             unresolved = state.get("issues") or []
             warnings = list(state.get("warnings") or [])
+            quality_gate: dict[str, Any] = {}
             if needs_revision(unresolved):
                 warning = {
                     "code": "validation_unresolved",
@@ -1561,6 +2011,12 @@ def build_writing_graph(context: AgentExecutionContext):
                 }
                 warnings.append(warning)
                 await context.emit("warning", warning, "finalize")
+                if state.get("task_type") == "reference" and state.get("reference_mode") == "base_revision":
+                    quality_gate = {
+                        "block_apply": True,
+                        "reason": "reference_base_revision_has_errors",
+                        "error_count": sum(1 for item in unresolved if item.get("severity") == "error"),
+                    }
             labels = {"general": "公文", "notice": "通知", "regulation": "规章制度", "speech": "讲话稿"}
             task_labels = {
                 "quick": "起草", "draft": "起草", "reference": "参考写作", "reply": "回函起草",
@@ -1580,15 +2036,21 @@ def build_writing_graph(context: AgentExecutionContext):
                 if knowledge_count:
                     source_parts.append(f"{knowledge_count} 条知识库来源")
                 summary += "，使用 " + "、".join(source_parts)
+            if quality_gate.get("block_apply"):
+                summary += "；因底稿差异校验仍有严重问题，已保存为候选稿，未自动覆盖正文"
             final_article, heading_warnings = normalize_markdown_headings(state.get("draft", ""))
             if heading_warnings:
                 warnings.extend(heading_warnings)
+            outcome = "message" if state.get("task_type") == "review" else "document"
+            if quality_gate.get("block_apply"):
+                outcome = "proposal"
             return {
                 "draft": final_article,
                 "final_article": final_article,
                 "summary": summary,
                 "warnings": warnings,
-                "outcome": "message" if state.get("task_type") == "review" else "document",
+                "outcome": outcome,
+                "quality_gate": quality_gate,
             }
 
         return await _stage(context, "finalize", state, operation)

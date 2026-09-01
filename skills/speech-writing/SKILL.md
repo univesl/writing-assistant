@@ -1,12 +1,15 @@
 ---
 name: speech-writing
-description: 撰写、检查和修订高校领导讲话稿、致辞和会议发言。用户选择讲话稿文种或要求生成可口头表达的正式讲话时使用。
+description: 撰写、检查和修订高校领导讲话稿、致辞、会议发言、研讨发言和总结部署讲话。用户选择讲话稿文种或要求生成适合口头表达的正式讲话时使用。
 allowed-tools: document_linter
 metadata:
   compatibility: Requires a Chinese-capable text model; kng_search is optional for facts and prior materials.
-  version: "1.2"
+  version: "1.3"
   role: writer
   task-types: [draft, reference, imitate, revise_document, revise_selection, review]
+  sources:
+    - buaa-official-content-writer
+    - dknowc-official-doc-writer
   workflow:
     outline: required
     model-review: true
@@ -21,18 +24,19 @@ metadata:
 
 # 讲话稿写作
 
-## 目标
+## 职责
 
-生成正式、自然、适合现场表达的讲话稿。事实、数据、案例和身份称谓必须来自用户要求或证据，不能为了增强感染力而编造。
+生成正式、自然、适合现场表达的讲话稿、致辞或发言材料。讲话稿可以有感染力，但事实、数据、案例、称谓、身份和会议背景必须来自用户要求或证据，不能为了增强气势而编造。
 
-## 工作方法
+## 工作流程
 
-1. 明确场合、听众、讲话人身份、主题和预计篇幅。
-2. 判断是部署、总结推进、致辞还是座谈发言，再按场合选择自然顺序；称谓、开场、任务和结尾都是候选功能，不是每篇必须齐全的模板。
-3. 段落应适合朗读，避免过长复句和连续堆砌口号。
-4. 将新闻或知识库材料转化为事实素材，不照抄新闻稿文风。
-5. 不把讲话稿写成通知、新闻稿或规章条款，完成后按 [讲话稿规范](references/style-guide.md) 检查语气和事实。
+1. 先明确场合、听众、讲话人身份、讲话目的、时长和是否代表单位正式表态。
+2. 判断类型：致辞、部署讲话、总结推进讲话、研讨发言、座谈发言、开幕/闭幕讲话。
+3. 先组织观点和段落功能，再安排表达节奏；不强行每部分“三点式”。
+4. 用户材料中的事实保持原状态强度。工作尚在谋划时，不写成已经完成；个别探索不写成全面成效。
+5. 参考历史讲话时，吸收结构、语气和节奏，不照搬旧称谓、活动背景、成绩数据和口号。
+6. 定稿前检查是否误写成通知、制度条款、新闻稿或宣传稿。
 
 ## 输出
 
-只输出完整 Markdown 正文，不要输出分析、提纲、来源列表、代码围栏或 ARTICLE/SUMMARY 标记。
+只输出完整 Markdown 正文。需要称谓、开场、主体和结尾时按场合自然呈现；不得输出写作说明、来源列表、代码围栏或聊天式解释。

@@ -409,6 +409,9 @@ class AgentRunManager:
             run.draft_content = article
             run.summary = summary
             run.outcome = state.get("outcome", "document")
+            if run.outcome == "proposal" and article:
+                run.proposal_content = article
+                run.proposal_status = "pending"
             run.references_json = _json_dumps(state.get("references", []))
             run.warnings_json = _json_dumps(state.get("warnings", []))
             run.issues_json = _json_dumps(state.get("issues", []))

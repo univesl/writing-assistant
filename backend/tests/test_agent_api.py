@@ -7,7 +7,9 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from app.agent.graph import OutlinePlan, ReviewResult, WritingPlan
+from app.database import SessionLocal
 from app.main import app
+from app.models import AgentRun, SessionFile
 
 
 class FakeModel:
@@ -53,6 +55,46 @@ class ParallelFakeModel(FakeModel):
     async def stream_text(self, _messages):
         await asyncio.sleep(0.35)
         yield "# 并行任务正文\n\n一、工作安排"
+
+
+API_BASE_35_TEXT = (
+    "# 北京航空航天大学关于启动第三十五届“冯如杯”竞赛的通知\n\n"
+    "各有关单位：\n\n"
+    "为做好第三十五届“冯如杯”竞赛的各项工作，现将相关事宜通知如下。\n\n"
+    "# 一、指导思想\n\n指导思想原文段落。\n\n"
+    "# 二、组织机构\n\n组织机构原文段落。\n\n"
+    "# 三、时间安排\n\n时间安排原文段落。\n\n"
+    "# 四、申报工作\n\n申报工作原文段落。\n\n"
+    "# 五、评审工作\n\n评审工作原文段落。\n\n"
+    "# 六、交流活动\n\n交流活动原文段落。\n\n"
+    "# 七、工作要求\n\n工作要求原文段落。\n\n"
+    "特此通知。\n\n"
+    "附件：\n1.附件一\n2.附件二\n3.附件三\n\n"
+    "北京航空航天大学\n\n2025年3月3日"
+)
+
+
+class BadReferenceBaseRevisionModel(FakeModel):
+    async def stream_text(self, _messages):
+        yield "# 北京航空航天大学关于举办第三十六届“冯如杯”竞赛的通知\n\n一、组织机构\n\n主办单位：北京航空航天大学。\n\n附件：\n1.新增附件"
+
+    async def complete_text(self, _messages):
+        return "# 北京航空航天大学关于举办第三十六届“冯如杯”竞赛的通知\n\n一、组织机构\n\n主办单位：北京航空航天大学。\n\n附件：\n1.新增附件"
+
+    async def complete_structured(self, _messages, schema):
+        if schema is OutlinePlan:
+            return OutlinePlan(title="测试", sections=["组织机构"])
+        if schema is WritingPlan:
+            return WritingPlan(
+                purpose="生成第三十六届通知",
+                structure_strategy="以第三十五届为底稿最小修订",
+                material_cards=[
+                    {"file_id": 901, "filename": "北京航空航天大学关于启动第三十四届“冯如杯”竞赛的通知.pdf"},
+                    {"file_id": 902, "filename": "北京航空航天大学关于启动第三十五届“冯如杯”竞赛的通知.pdf"},
+                ],
+                reference_strategy={"target_document_type": "notice", "material_plans": []},
+            )
+        return ReviewResult(issues=[])
 
 
 class AgentApiTest(unittest.TestCase):
@@ -256,6 +298,69 @@ class AgentApiTest(unittest.TestCase):
                     current = client.get(f"/api/content/article/{session_id}").json()["data"]
                     self.assertEqual(current["article_content"], retry_snapshot["final_article"])
                     self.assertEqual(current["article_version"], 3)
+                finally:
+                    client.delete(f"/api/session/delete/{session_id}")
+
+    def test_reference_base_revision_errors_are_not_applied(self):
+        with patch("app.agent.manager.get_model_registry", return_value=FakeRegistry(BadReferenceBaseRevisionModel)):
+            with TestClient(app) as client:
+                session_id = client.post(
+                    "/api/session/create", json={"session_name": "Reference proposal test"}
+                ).json()["data"]["session_id"]
+                try:
+                    original = "# 用户当前正文\n\n一、不要被覆盖"
+                    client.post(
+                        "/api/content/article/save",
+                        json={"session_id": session_id, "article_content": original},
+                    )
+                    with SessionLocal() as db:
+                        db.add(SessionFile(
+                            session_id=session_id,
+                            original_filename="北京航空航天大学关于启动第三十四届“冯如杯”竞赛的通知.pdf",
+                            storage_path="dummy-34.pdf",
+                            file_type="pdf",
+                            parsed_content=API_BASE_35_TEXT.replace("第三十五届", "第三十四届"),
+                            status="completed",
+                        ))
+                        db.add(SessionFile(
+                            session_id=session_id,
+                            original_filename="北京航空航天大学关于启动第三十五届“冯如杯”竞赛的通知.pdf",
+                            storage_path="dummy-35.pdf",
+                            file_type="pdf",
+                            parsed_content=API_BASE_35_TEXT,
+                            status="completed",
+                        ))
+                        db.commit()
+                        file_ids = [
+                            row.file_id
+                            for row in db.query(SessionFile)
+                            .filter(SessionFile.session_id == session_id)
+                            .order_by(SessionFile.file_id)
+                            .all()
+                        ]
+                    response = client.post(
+                        "/api/agent/runs",
+                        json={
+                            "session_id": session_id,
+                            "task_type": "reference",
+                            "document_type": "notice",
+                            "requirements": "用第三十四届和第三十五届参考生成第三十六届，尽量使用原文，只有提到修改的地方再改",
+                            "source_file_ids": file_ids,
+                        },
+                    )
+                    self.assertEqual(response.status_code, 202)
+                    run_id = response.json()["run_id"]
+                    snapshot = self.wait_for_run(client, run_id)
+                    self.assertEqual(snapshot["status"], "completed")
+                    self.assertEqual(snapshot["outcome"], "proposal")
+                    self.assertIsNone(snapshot["applied_version"])
+                    current = client.get(f"/api/content/article/{session_id}").json()["data"]
+                    self.assertEqual(current["article_content"], original)
+                    self.assertEqual(current["article_version"], 1)
+                    with SessionLocal() as db:
+                        run = db.get(AgentRun, run_id)
+                        self.assertEqual(run.proposal_status, "pending")
+                        self.assertIn("关于举办第三十六届", run.proposal_content)
                 finally:
                     client.delete(f"/api/session/delete/{session_id}")
 

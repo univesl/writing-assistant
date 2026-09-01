@@ -12,6 +12,7 @@ from app.agent.graph import (
     ReviewResult,
     WritingPlan,
     build_writing_graph,
+    _infer_reference_mode,
 )
 from app.agent.skill_registry import SkillRegistry
 
@@ -261,6 +262,75 @@ class SelectionBoundaryModel(FakeModel):
         return await super().complete_structured(_messages, schema)
 
 
+BASE_35_TEXT = (
+    "# 北京航空航天大学关于启动第三十五届“冯如杯”竞赛的通知\n\n"
+    "各有关单位：\n\n"
+    "为做好第三十五届“冯如杯”竞赛的各项工作，现将相关事宜通知如下。\n\n"
+    "# 一、指导思想\n\n"
+    "本届竞赛注重传承发扬冯如精神，弘扬空天报国情怀，营造航空航天特色学术科技氛围，提升竞赛覆盖面。\n\n"
+    "# 二、组织机构\n\n"
+    "主办单位：北京航空航天大学学生工作部\n\n"
+    "# 三、时间安排\n\n"
+    "2025年3月27日14:00-2025年4月9日12:00 全部赛道 网上申报\n\n"
+    "# 四、申报工作\n\n"
+    "1.各学院（书院）成立竞赛领导小组，负责参赛项目选拔和推荐。\n"
+    "2.主赛道专项竞赛包括“互联世界”专项竞赛。\n\n"
+    "# 五、评审工作\n\n"
+    "1.在学校有效性审查前，各学院（书院）完成所有项目有效性审查和院级评审。\n"
+    "2.主赛道项目采用院级评审、网上评审和现场评审相结合的方式。\n\n"
+    "# 六、交流活动\n\n"
+    "1.组委会将于5月中旬举办冯如文化节活动。\n"
+    "2.组委会将于竞赛期间邀请专家举办科技创新方法讲座。\n\n"
+    "# 七、工作要求\n\n"
+    "1.“冯如杯”竞赛的组织和参赛工作要与学校教学和人才培养工作紧密结合。\n"
+    "2.为确保第三十五届“冯如杯”竞赛顺利进行，各相关部处、学院（书院）要加强领导。\n\n"
+    "特此通知。\n\n"
+    "附件：\n"
+    "1.北京航空航天大学第三十五届“冯如杯”竞赛章程\n"
+    "2.北京航空航天大学第三十五届“冯如杯”竞赛申报流程\n"
+    "3.北京航空航天大学第三十五届“冯如杯”竞赛学院（书院）审核说明\n\n"
+    "北京航空航天大学\n\n"
+    "2025年3月3日"
+)
+
+
+class BaseRevisionReferenceModel(FakeModel):
+    async def stream_text(self, _messages):
+        prompt = _messages[-1]["content"]
+        self.prompts.append(("draft", prompt))
+        text = BASE_35_TEXT.replace("第三十五届", "第三十六届").replace("2025年3月3日", "2026年3月23日")
+        yield text + "\n4.北京航空航天大学第三十六届“冯如杯”竞赛院级项目成果审查报告"
+
+    async def complete_structured(self, _messages, schema):
+        self.prompts.append((schema.__name__, _messages[-1]["content"]))
+        if schema is WritingPlan:
+            return schema(
+                purpose="生成第三十六届通知",
+                structure_strategy="以第三十五届为底稿最小修订",
+                material_cards=[
+                    {"file_id": 21, "filename": "北京航空航天大学关于启动第三十四届“冯如杯”竞赛的通知.pdf"},
+                    {"file_id": 22, "filename": "北京航空航天大学关于启动第三十五届“冯如杯”竞赛的通知.pdf"},
+                ],
+                reference_strategy={
+                    "target_document_type": "notice",
+                    "material_plans": [],
+                },
+            )
+        return schema(issues=[])
+
+
+class BadBaseRevisionReferenceModel(BaseRevisionReferenceModel):
+    async def stream_text(self, _messages):
+        prompt = _messages[-1]["content"]
+        self.prompts.append(("draft", prompt))
+        yield (
+            "# 北京航空航天大学关于举办第三十六届“冯如杯”竞赛的通知\n\n"
+            "现将有关事项通知如下。\n\n"
+            "一、组织机构\n\n主办单位：北京航空航天大学。\n\n"
+            "附件：\n1.新增附件"
+        )
+
+
 class AgentGraphTest(unittest.IsolatedAsyncioTestCase):
     async def run_graph(self, model, document_type="notice", use_kng=False):
         events = []
@@ -331,6 +401,46 @@ class AgentGraphTest(unittest.IsolatedAsyncioTestCase):
             "model_profile_id": "fake",
             "revision_count": 0,
         }, config={"configurable": {"thread_id": "reference-run"}})
+        return result, events
+
+    async def run_base_revision_reference_graph(self, model):
+        events = []
+
+        async def emit(event_type, data, stage=None):
+            events.append((event_type, data, stage))
+
+        context = AgentExecutionContext(
+            model=model,
+            skills=SkillRegistry(),
+            checkpointer=MemorySaver(),
+            emit=emit,
+            persist_state=lambda _state, _stage: _async_none(),
+            update_draft=lambda _draft: _async_none(),
+            is_cancelled=lambda: False,
+        )
+        graph = build_writing_graph(context)
+        result = await graph.ainvoke({
+            "run_id": "base-revision-reference-run",
+            "session_id": 1,
+            "task_type": "reference",
+            "document_type": "notice",
+            "requirements": "用第三十四届和第三十五届参考生成第三十六届，尽量使用原文，只有提到修改的地方再改",
+            "source_materials": [
+                {
+                    "file_id": 21,
+                    "filename": "北京航空航天大学关于启动第三十四届“冯如杯”竞赛的通知.pdf",
+                    "content": BASE_35_TEXT.replace("第三十五届", "第三十四届"),
+                },
+                {
+                    "file_id": 22,
+                    "filename": "北京航空航天大学关于启动第三十五届“冯如杯”竞赛的通知.pdf",
+                    "content": BASE_35_TEXT,
+                },
+            ],
+            "use_kng": False,
+            "model_profile_id": "fake",
+            "revision_count": 0,
+        }, config={"configurable": {"thread_id": "base-revision-reference-run"}})
         return result, events
 
     async def test_completes_and_streams_public_content(self):
@@ -468,6 +578,41 @@ class AgentGraphTest(unittest.IsolatedAsyncioTestCase):
             if event[0] == "source.added" and isinstance(event[1].get("reference"), dict)
         ]
         self.assertEqual(used_files, [11, 12, 13])
+
+    async def test_reference_detects_base_revision_and_passes_full_base_to_draft(self):
+        model = BaseRevisionReferenceModel()
+        result, events = await self.run_base_revision_reference_graph(model)
+        self.assertEqual(result["reference_mode"], "base_revision")
+        self.assertEqual(result["reference_base_file_id"], 22)
+        self.assertEqual(result["evidence"][0]["file_id"], 22)
+        self.assertIn(BASE_35_TEXT, result["reference_base_text"])
+        draft_prompt = "\n".join(prompt for name, prompt in model.prompts if name == "draft")
+        self.assertIn("主底稿全文", draft_prompt)
+        self.assertIn(BASE_35_TEXT, draft_prompt)
+        material_plan = result["workflow_plan"]["material_plan"]
+        self.assertEqual(material_plan["reference_mode"], "base_revision")
+        base_binding = [item for item in material_plan["source_bindings"] if item["file_id"] == 22][0]
+        self.assertTrue(base_binding["pass_full_text"])
+        warning_codes = {item["code"] for item in result["warnings"]}
+        self.assertIn("reference_base_revision_mode", warning_codes)
+        self.assertEqual(result["outcome"], "document")
+
+    async def test_weak_reference_signal_without_edition_context_stays_synthesize(self):
+        mode = _infer_reference_mode(
+            "参考上传材料生成一份通知，保留正式口吻",
+            [{"file_id": 31, "filename": "工作安排参考材料.docx", "content": "参考内容"}],
+        )
+        self.assertEqual(mode, "synthesize")
+
+    async def test_bad_base_revision_reference_is_saved_as_proposal(self):
+        model = BadBaseRevisionReferenceModel()
+        result, _events = await self.run_base_revision_reference_graph(model)
+        self.assertEqual(result["reference_mode"], "base_revision")
+        self.assertEqual(result["outcome"], "proposal")
+        self.assertTrue(result["quality_gate"]["block_apply"])
+        issue_codes = {item["code"] for item in result["issues"]}
+        self.assertIn("reference_base_sections_missing", issue_codes)
+        self.assertIn("reference_base_length_short", issue_codes)
 
     async def test_selection_revision_cannot_change_text_outside_selection(self):
         events = []

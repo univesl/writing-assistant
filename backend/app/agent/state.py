@@ -12,6 +12,11 @@ class WritingState(TypedDict, total=False):
     source_materials: list[dict[str, Any]]
     material_cards: list[dict[str, Any]]
     reference_strategy: dict[str, Any]
+    reference_mode: str
+    reference_base_file_id: int | None
+    reference_base_text: str
+    reference_supporting_file_ids: list[int]
+    source_bindings: list[dict[str, Any]]
     writing_plan: dict[str, Any]
     base_article: str
     selection: dict[str, Any]
@@ -38,3 +43,4 @@ class WritingState(TypedDict, total=False):
     final_article: str
     summary: str
     outcome: str
+    quality_gate: dict[str, Any]
