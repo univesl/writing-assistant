@@ -29,8 +29,7 @@ def write_skill(root: Path, name: str, allowed_tools: str = "document_linter", s
 class SkillRegistryTest(unittest.TestCase):
     def test_project_registry_exposes_general_writing_and_review_skills(self):
         skills = {skill.name: skill for skill in SkillRegistry().list()}
-        self.assertEqual(skills["official-document-writing"].status, "ready")
-        self.assertEqual(skills["official-document-review"].status, "ready")
+        self.assertEqual(skills["buaa-official-content-writer"].status, "ready")
 
     def test_missing_tool_is_incompatible_and_cannot_load(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -78,8 +77,7 @@ class SkillRegistryTest(unittest.TestCase):
         compiler = WorkflowCompiler(SkillRegistry())
         plan = compiler.compile(
             task_type="draft",
-            primary_skill_name="notice-writing",
-            supporting_skill_names=("official-document-review",),
+            primary_skill_name="buaa-official-content-writer",
         )
         self.assertIn("validation", plan.stages)
         self.assertEqual(plan.policy["max_revisions"], 1)

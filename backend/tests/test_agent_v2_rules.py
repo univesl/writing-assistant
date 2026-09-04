@@ -1,9 +1,6 @@
-import asyncio
 import unittest
-from pathlib import Path
 
 from app.agent.linter import lint_document, normalize_markdown_headings
-from app.agent.script_runner import execute_script
 from app.agent.skill_registry import SkillRegistry
 
 
@@ -24,21 +21,13 @@ class AgentV2RulesTest(unittest.TestCase):
         self.assertIn("ambiguous_extra_title", {item["code"] for item in warnings})
         self.assertIn("multiple_document_titles", {item["code"] for item in lint_document("notice", "", normalized)})
 
-    def test_approved_skill_scripts_are_ready_and_unknown_scripts_degraded(self):
+    def test_current_skill_uses_project_reference_files(self):
         skills = {item.name: item for item in SkillRegistry().list()}
-        official = skills["official-document-writing"]
-        self.assertIn("scripts/prose_lint.py", official.resources)
-        self.assertNotIn("scripts/prose_lint.py", official.disabled_scripts)
-        self.assertEqual(skills["notice-writing"].status, "ready")
-
-    def test_prose_lint_script_is_read_only_and_json(self):
-        result = asyncio.run(execute_script(
-            "official-document-writing",
-            "scripts/prose_lint.py",
-            "作为AI助手，根据用户要求生成正文。",
-        ))
-        self.assertTrue(result)
-        self.assertEqual(result[0]["label"], "thought-leak")
+        skill = skills["buaa-official-content-writer"]
+        self.assertEqual(skill.status, "ready")
+        self.assertIn("references/task_router.md", skill.resources)
+        self.assertIn("references/fact_discipline.md", skill.resources)
+        self.assertIn("references/doc_types/notice.md", skill.resources)
 
 
 if __name__ == "__main__":

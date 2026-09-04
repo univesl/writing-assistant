@@ -20,7 +20,7 @@ from .routers import upload as upload_router
 from .routers import generate as generate_router
 from .routers import templates as templates_router
 from .routers import agent as agent_router
-from .agent.manager import get_agent_run_manager
+from .agent.runtime.manager import get_agent_run_manager
 from .utils import err, ok, dt_str
 from .database import SessionLocal
 

@@ -10,12 +10,52 @@ description_zh: >
 category: 通用办公
 version: 0.1.0
 author: BUAA Official Docs
+allowed-tools: document_linter
 tags:
   - 公文
   - 北航
   - 写作
 metadata:
   short-description: 北航校内公文正文起草、改写和审校
+  writing-assistant:
+    roles:
+      - primary
+    task-types:
+      - draft
+      - reference
+      - reply
+      - imitate
+      - revise_document
+      - revise_selection
+      - review
+      - format
+    workflow:
+      outline: embedded_in_planning
+      model-review: true
+      max-revisions: 1
+      references:
+        planning:
+          - references/task_router.md
+          - references/buaa_context.md
+          - references/fact_discipline.md
+          - references/doc_types/index.md
+        outline:
+          - references/task_router.md
+          - references/fact_discipline.md
+          - references/doc_types/index.md
+        draft:
+          - references/buaa_context.md
+          - references/fact_discipline.md
+          - references/doc_types/index.md
+        validation:
+          - references/fact_discipline.md
+          - references/review_checklist.md
+        revision:
+          - references/fact_discipline.md
+          - references/review_checklist.md
+        analysis:
+          - references/task_router.md
+          - references/fact_discipline.md
 ---
 
 # 北航公文写作

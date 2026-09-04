@@ -12,6 +12,14 @@ import yaml
 _NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n?(.*)$", re.DOTALL)
 _RESOURCE_DIRS = ("references", "assets", "scripts")
+_SKILL_ALIASES = {
+    "official-document-writing": "buaa-official-content-writer",
+    "notice-writing": "buaa-official-content-writer",
+    "regulation-writing": "buaa-official-content-writer",
+    "speech-writing": "buaa-official-content-writer",
+    "official-document-review": "buaa-official-content-writer",
+    "reference-material-analysis": "buaa-official-content-writer",
+}
 
 
 class SkillValidationError(ValueError):
@@ -181,6 +189,7 @@ class SkillRegistry:
     def get(self, name: str) -> SkillDescriptor:
         if not self._skills:
             self.load()
+        name = _SKILL_ALIASES.get(name, name)
         try:
             skill = self._skills[name]
         except KeyError as exc:

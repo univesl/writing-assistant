@@ -5,7 +5,7 @@ import time
 from fastapi import APIRouter, Header, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 
-from ..agent.manager import (
+from ..agent.runtime.manager import (
     TERMINAL_STATUSES,
     ActiveRunError,
     AgentRunNotFoundError,

@@ -25,8 +25,6 @@ class ScriptSpec:
 
 APP_ROOT = Path(__file__).resolve().parents[3]
 APPROVED_SCRIPTS = {
-    "scripts/prose_lint.py": ScriptSpec("official-document-writing", "scripts/prose_lint.py", "text"),
-    "scripts/review_document.py": ScriptSpec("official-document-writing", "scripts/review_document.py", "docx"),
 }
 
 

@@ -91,7 +91,7 @@ async def generate_document_endpoint(
 
 @router.post("/reference-write")
 async def reference_write(request: ReferenceWriteRequest):
-    """参考写作（流式）：根据上传文件进行回函/仿写/基于内容生成"""
+    """参考写作（流式）：根据上传文件进行回函/底稿微调/基于内容生成"""
     return StreamingResponse(
         generate_reference_document(
             reference_content=request.reference_content,

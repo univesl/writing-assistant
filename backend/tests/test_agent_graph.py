@@ -12,7 +12,6 @@ from app.agent.graph import (
     ReviewResult,
     WritingPlan,
     build_writing_graph,
-    _infer_reference_mode,
 )
 from app.agent.skill_registry import SkillRegistry
 
@@ -146,7 +145,7 @@ class ChineseStyleScenarioModel(FakeModel):
         self.prompts.append((schema.__name__, prompt))
         if schema.__name__ == "OutlinePlan":
             return schema(title="关于档案整理工作的方案", sections=["整理任务", "汇总反馈"])
-        if "有关部门要凝心聚力、提质增效" in prompt and "中文公文表达与去空话审查" in prompt:
+        if "有关部门要凝心聚力、提质增效" in prompt and "空泛排比" in prompt:
             return schema(
                 issues=[{
                     "code": "empty_ai_style",
@@ -294,7 +293,7 @@ BASE_35_TEXT = (
 )
 
 
-class BaseRevisionReferenceModel(FakeModel):
+class BaseTuningReferenceModel(FakeModel):
     async def stream_text(self, _messages):
         prompt = _messages[-1]["content"]
         self.prompts.append(("draft", prompt))
@@ -319,7 +318,7 @@ class BaseRevisionReferenceModel(FakeModel):
         return schema(issues=[])
 
 
-class BadBaseRevisionReferenceModel(BaseRevisionReferenceModel):
+class BadBaseTuningReferenceModel(BaseTuningReferenceModel):
     async def stream_text(self, _messages):
         prompt = _messages[-1]["content"]
         self.prompts.append(("draft", prompt))
@@ -370,7 +369,7 @@ class AgentGraphTest(unittest.IsolatedAsyncioTestCase):
         )
         return result, events, drafts
 
-    async def run_reference_graph(self, model):
+    async def run_reference_graph(self, model, task_type="reference"):
         events = []
 
         async def emit(event_type, data, stage=None):
@@ -389,7 +388,7 @@ class AgentGraphTest(unittest.IsolatedAsyncioTestCase):
         result = await graph.ainvoke({
             "run_id": "reference-run",
             "session_id": 1,
-            "task_type": "reference",
+            "task_type": task_type,
             "document_type": "notice",
             "requirements": "以骨架.docx为结构，内容.txt只作内容，风格.md只参考表达",
             "source_materials": [
@@ -403,7 +402,7 @@ class AgentGraphTest(unittest.IsolatedAsyncioTestCase):
         }, config={"configurable": {"thread_id": "reference-run"}})
         return result, events
 
-    async def run_base_revision_reference_graph(self, model):
+    async def run_base_tuning_reference_graph(self, model):
         events = []
 
         async def emit(event_type, data, stage=None):
@@ -420,9 +419,9 @@ class AgentGraphTest(unittest.IsolatedAsyncioTestCase):
         )
         graph = build_writing_graph(context)
         result = await graph.ainvoke({
-            "run_id": "base-revision-reference-run",
+            "run_id": "base-tuning-reference-run",
             "session_id": 1,
-            "task_type": "reference",
+            "task_type": "imitate",
             "document_type": "notice",
             "requirements": "用第三十四届和第三十五届参考生成第三十六届，尽量使用原文，只有提到修改的地方再改",
             "source_materials": [
@@ -440,7 +439,7 @@ class AgentGraphTest(unittest.IsolatedAsyncioTestCase):
             "use_kng": False,
             "model_profile_id": "fake",
             "revision_count": 0,
-        }, config={"configurable": {"thread_id": "base-revision-reference-run"}})
+        }, config={"configurable": {"thread_id": "base-tuning-reference-run"}})
         return result, events
 
     async def test_completes_and_streams_public_content(self):
@@ -463,14 +462,12 @@ class AgentGraphTest(unittest.IsolatedAsyncioTestCase):
         model = FakeModel()
         result, _events, _drafts = await self.run_graph(model, document_type="general")
         prompts = {name: prompt for name, prompt in model.prompts}
-        self.assertEqual(result["skill_name"], "official-document-writing")
-        self.assertIn("文种与行文方向", prompts["WritingPlan"])
-        self.assertIn("通用公文起草指南", prompts["draft"])
-        self.assertIn("中文公文表达与去空话审查", prompts["draft"])
-        self.assertIn("命令（令）", prompts["WritingPlan"])
-        self.assertNotIn("跨文种审查重点", prompts["draft"])
-        self.assertIn("跨文种审查重点", prompts["ReviewResult"])
-        self.assertIn("模糊主体", prompts["ReviewResult"])
+        self.assertEqual(result["skill_name"], "buaa-official-content-writer")
+        self.assertIn("Skill：buaa-official-content-writer", prompts["WritingPlan"])
+        self.assertIn("北航语境", prompts["draft"])
+        self.assertIn("事实克制", prompts["draft"])
+        self.assertNotIn("审查输出格式", prompts["draft"])
+        self.assertIn("审查输出格式", prompts["ReviewResult"])
 
     async def test_chinese_style_review_repairs_empty_ai_language(self):
         model = ChineseStyleScenarioModel()
@@ -482,7 +479,7 @@ class AgentGraphTest(unittest.IsolatedAsyncioTestCase):
     async def test_kng_failure_is_nonfatal_and_regulation_is_marked_unverified(self):
         service = Mock()
         service.retrieve_for_document_generation.return_value = {"content": "", "references": []}
-        with patch("app.agent.graph.get_kng_rag_service", return_value=service):
+        with patch("app.agent.nodes.retrieval.get_kng_rag_service", return_value=service):
             result, _events, _drafts = await self.run_graph(
                 FakeModel(), document_type="regulation", use_kng=True
             )
@@ -508,7 +505,7 @@ class AgentGraphTest(unittest.IsolatedAsyncioTestCase):
             }
 
         service.retrieve_for_document_generation.side_effect = retrieve
-        with patch("app.agent.graph.get_kng_rag_service", return_value=service):
+        with patch("app.agent.nodes.retrieval.get_kng_rag_service", return_value=service):
             result, events, _drafts = await self.run_graph(model, use_kng=True)
 
         self.assertEqual(len(result["retrieval_plan"]), 2)
@@ -544,7 +541,7 @@ class AgentGraphTest(unittest.IsolatedAsyncioTestCase):
                     active -= 1
 
         service.retrieve_for_document_generation.side_effect = retrieve
-        with patch("app.agent.graph.get_kng_rag_service", return_value=service):
+        with patch("app.agent.nodes.retrieval.get_kng_rag_service", return_value=service):
             result, _events, _drafts = await self.run_graph(model, use_kng=True)
 
         self.assertEqual(model.plan_calls, 2)
@@ -566,9 +563,11 @@ class AgentGraphTest(unittest.IsolatedAsyncioTestCase):
         model = MultiMaterialScenarioModel()
         result, events = await self.run_reference_graph(model)
         self.assertEqual(result["document_type"], "notice")
+        self.assertIsNone(result.get("reference_base_file_id"))
         self.assertEqual(result["reference_strategy"]["structure_source_file_ids"], [11])
         self.assertEqual(len(result["evidence"]), 1)
-        self.assertEqual(result["evidence"][0]["file_id"], 12)
+        self.assertEqual([item["file_id"] for item in result["evidence"]], [12])
+        self.assertNotIn("底稿微调上下文", "\n".join(prompt for name, prompt in model.prompts if name == "draft"))
         writing_prompts = "\n".join(
             prompt for name, prompt in model.prompts if name == "draft"
         )
@@ -579,35 +578,33 @@ class AgentGraphTest(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertEqual(used_files, [11, 12, 13])
 
-    async def test_reference_detects_base_revision_and_passes_full_base_to_draft(self):
-        model = BaseRevisionReferenceModel()
-        result, events = await self.run_base_revision_reference_graph(model)
-        self.assertEqual(result["reference_mode"], "base_revision")
+    async def test_reference_detects_base_tuning_and_passes_full_base_to_draft(self):
+        model = BaseTuningReferenceModel()
+        result, events = await self.run_base_tuning_reference_graph(model)
         self.assertEqual(result["reference_base_file_id"], 22)
         self.assertEqual(result["evidence"][0]["file_id"], 22)
         self.assertIn(BASE_35_TEXT, result["reference_base_text"])
+        self.assertIn("第三十五届", result["reference_change_plan"]["global_replace"][0]["from"])
+        self.assertIn("第三十六届", result["reference_change_plan"]["global_replace"][0]["to"])
         draft_prompt = "\n".join(prompt for name, prompt in model.prompts if name == "draft")
-        self.assertIn("主底稿全文", draft_prompt)
+        self.assertIn("底稿微调上下文", draft_prompt)
         self.assertIn(BASE_35_TEXT, draft_prompt)
         material_plan = result["workflow_plan"]["material_plan"]
-        self.assertEqual(material_plan["reference_mode"], "base_revision")
+        self.assertEqual(material_plan["reference_base_file_id"], 22)
         base_binding = [item for item in material_plan["source_bindings"] if item["file_id"] == 22][0]
         self.assertTrue(base_binding["pass_full_text"])
         warning_codes = {item["code"] for item in result["warnings"]}
-        self.assertIn("reference_base_revision_mode", warning_codes)
+        self.assertIn("reference_base_selected", warning_codes)
         self.assertEqual(result["outcome"], "document")
 
-    async def test_weak_reference_signal_without_edition_context_stays_synthesize(self):
-        mode = _infer_reference_mode(
-            "参考上传材料生成一份通知，保留正式口吻",
-            [{"file_id": 31, "filename": "工作安排参考材料.docx", "content": "参考内容"}],
-        )
-        self.assertEqual(mode, "synthesize")
+    async def test_base_tuning_without_edition_signal_still_selects_a_base(self):
+        result, _events = await self.run_reference_graph(FakeModel(), task_type="imitate")
+        self.assertEqual(result["reference_base_file_id"], 11)
+        self.assertTrue(result["reference_change_plan"]["keep_rules"])
 
-    async def test_bad_base_revision_reference_is_saved_as_proposal(self):
-        model = BadBaseRevisionReferenceModel()
-        result, _events = await self.run_base_revision_reference_graph(model)
-        self.assertEqual(result["reference_mode"], "base_revision")
+    async def test_bad_base_tuning_reference_is_saved_as_proposal(self):
+        model = BadBaseTuningReferenceModel()
+        result, _events = await self.run_base_tuning_reference_graph(model)
         self.assertEqual(result["outcome"], "proposal")
         self.assertTrue(result["quality_gate"]["block_apply"])
         issue_codes = {item["code"] for item in result["issues"]}

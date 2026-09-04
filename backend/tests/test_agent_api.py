@@ -74,7 +74,7 @@ API_BASE_35_TEXT = (
 )
 
 
-class BadReferenceBaseRevisionModel(FakeModel):
+class BadReferenceBaseTuningModel(FakeModel):
     async def stream_text(self, _messages):
         yield "# 北京航空航天大学关于举办第三十六届“冯如杯”竞赛的通知\n\n一、组织机构\n\n主办单位：北京航空航天大学。\n\n附件：\n1.新增附件"
 
@@ -109,7 +109,7 @@ class AgentApiTest(unittest.TestCase):
         return snapshot
 
     def test_run_lifecycle_replay_and_session_concurrency(self):
-        with patch("app.agent.manager.get_model_registry", return_value=FakeRegistry()):
+        with patch("app.agent.runtime.manager.get_model_registry", return_value=FakeRegistry()):
             with TestClient(app) as client:
                 session_response = client.post(
                     "/api/session/create", json={"session_name": "Agent API test"}
@@ -169,7 +169,7 @@ class AgentApiTest(unittest.TestCase):
                     client.delete(f"/api/session/delete/{session_id}")
 
     def test_cancel_is_immediate_and_retry_completes(self):
-        with patch("app.agent.manager.get_model_registry", return_value=FakeRegistry()):
+        with patch("app.agent.runtime.manager.get_model_registry", return_value=FakeRegistry()):
             with TestClient(app) as client:
                 session_id = client.post(
                     "/api/session/create", json={"session_name": "Agent cancel test"}
@@ -199,7 +199,7 @@ class AgentApiTest(unittest.TestCase):
 
     def test_shutdown_marks_active_run_interrupted(self):
         registry = FakeRegistry(SlowFakeModel)
-        with patch("app.agent.manager.get_model_registry", return_value=registry):
+        with patch("app.agent.runtime.manager.get_model_registry", return_value=registry):
             with TestClient(app) as client:
                 session_id = client.post(
                     "/api/session/create", json={"session_name": "Agent restart test"}
@@ -218,7 +218,7 @@ class AgentApiTest(unittest.TestCase):
                     client.delete(f"/api/session/delete/{session_id}")
 
     def test_existing_article_is_atomically_overwritten_on_completion(self):
-        with patch("app.agent.manager.get_model_registry", return_value=FakeRegistry()):
+        with patch("app.agent.runtime.manager.get_model_registry", return_value=FakeRegistry()):
             with TestClient(app) as client:
                 session_id = client.post(
                     "/api/session/create", json={"session_name": "Proposal test"}
@@ -252,7 +252,7 @@ class AgentApiTest(unittest.TestCase):
 
     def test_version_conflict_preserves_user_article(self):
         registry = FakeRegistry(ConflictFakeModel)
-        with patch("app.agent.manager.get_model_registry", return_value=registry):
+        with patch("app.agent.runtime.manager.get_model_registry", return_value=registry):
             with TestClient(app) as client:
                 session_id = client.post(
                     "/api/session/create", json={"session_name": "Version conflict test"}
@@ -301,8 +301,8 @@ class AgentApiTest(unittest.TestCase):
                 finally:
                     client.delete(f"/api/session/delete/{session_id}")
 
-    def test_reference_base_revision_errors_are_not_applied(self):
-        with patch("app.agent.manager.get_model_registry", return_value=FakeRegistry(BadReferenceBaseRevisionModel)):
+    def test_reference_base_tuning_errors_are_not_applied(self):
+        with patch("app.agent.runtime.manager.get_model_registry", return_value=FakeRegistry(BadReferenceBaseTuningModel)):
             with TestClient(app) as client:
                 session_id = client.post(
                     "/api/session/create", json={"session_name": "Reference proposal test"}
@@ -342,7 +342,7 @@ class AgentApiTest(unittest.TestCase):
                         "/api/agent/runs",
                         json={
                             "session_id": session_id,
-                            "task_type": "reference",
+                            "task_type": "imitate",
                             "document_type": "notice",
                             "requirements": "用第三十四届和第三十五届参考生成第三十六届，尽量使用原文，只有提到修改的地方再改",
                             "source_file_ids": file_ids,
@@ -366,7 +366,7 @@ class AgentApiTest(unittest.TestCase):
 
     def test_three_sessions_run_in_parallel_and_fourth_waits(self):
         registry = FakeRegistry(ParallelFakeModel)
-        with patch("app.agent.manager.get_model_registry", return_value=registry):
+        with patch("app.agent.runtime.manager.get_model_registry", return_value=registry):
             with TestClient(app) as client:
                 session_ids = [
                     client.post(

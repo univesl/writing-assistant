@@ -1,0 +1,211 @@
+/* 全局生成状态：切换到编辑页后仍保持可见，避免首个流式响应前像是卡住。 */
+.generation-status {
+  position: fixed;
+  top: 72px;
+  left: 50%;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: min(440px, calc(100vw - 32px));
+  padding: 12px 16px;
+  color: #1f2329;
+  background: #ffffff;
+  border: 1px solid #91caff;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(5, 91, 170, 0.18);
+  pointer-events: none;
+  transform: translateX(-50%);
+  animation: generation-status-in 0.2s ease-out;
+}
+
+.generation-status-spinner {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  border: 2px solid #bae0ff;
+  border-top-color: #1677ff;
+  border-radius: 50%;
+  animation: generation-status-spin 0.8s linear infinite;
+}
+
+.generation-status-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  line-height: 1.4;
+}
+
+.generation-status-copy strong {
+  color: #0958d9;
+  font-size: 14px;
+}
+
+.generation-status-copy span {
+  color: #4e5969;
+  font-size: 13px;
+}
+
+@keyframes generation-status-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes generation-status-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .generation-status,
+  .generation-status-spinner {
+    animation: none;
+  }
+}
+
+/* Agent 辅助栏：正文编辑器仍是主视图，运行详情占用原对话栏。 */
+.assistant-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 10px 12px 0;
+  background: #fff;
+  border-bottom: 1px solid #e7e7e9;
+}
+
+.assistant-tabs button {
+  position: relative;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  padding: 10px 6px;
+  color: #71717a;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.assistant-tabs button.active {
+  color: #18181b;
+  border-bottom-color: #18181b;
+  font-weight: 600;
+}
+
+.assistant-tabs i,
+.session-run-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.agent-run-panel {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  background: #fafafa;
+}
+
+.agent-empty {
+  padding: 40px 20px;
+  text-align: center;
+  color: #71717a;
+}
+
+.agent-run-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid #e4e4e7;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.agent-run-header > div { flex: 1; min-width: 0; }
+.agent-run-header strong, .agent-run-header span { display: block; }
+.agent-run-header span { margin-top: 2px; color: #71717a; font-size: 12px; }
+.agent-secondary-btn, .agent-primary-btn {
+  border: 1px solid #d4d4d8;
+  border-radius: 8px;
+  padding: 6px 11px;
+  background: #fff;
+  cursor: pointer;
+}
+.agent-primary-btn { border-color: #18181b; background: #18181b; color: #fff; }
+
+.agent-timeline {
+  list-style: none;
+  margin: 18px 0;
+  padding: 0 0 0 5px;
+}
+
+.agent-timeline li {
+  position: relative;
+  min-height: 34px;
+  padding: 0 0 14px 25px;
+  color: #3f3f46;
+  font-size: 13px;
+}
+
+.agent-timeline li::before {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 8px;
+  bottom: -8px;
+  width: 1px;
+  background: #d4d4d8;
+}
+
+.agent-timeline li:last-child::before { display: none; }
+.agent-timeline li > span {
+  position: absolute;
+  left: 1px;
+  top: 5px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #22c55e;
+}
+.agent-timeline li.warning > span { background: #f59e0b; }
+.agent-timeline li p { margin: 0; }
+
+.agent-result-section {
+  margin-top: 12px;
+  padding: 13px 14px;
+  border: 1px solid #e4e4e7;
+  border-radius: 10px;
+  background: #fff;
+}
+.agent-result-section.warning { border-color: #fde68a; background: #fffbeb; }
+.agent-result-section h3 { margin: 0 0 7px; font-size: 13px; }
+.agent-result-section ul { margin: 0; padding-left: 18px; color: #52525b; font-size: 12px; }
+
+.agent-details {
+  margin: 8px 0 18px;
+  border: 1px solid #e4e4e7;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.agent-details > summary {
+  cursor: pointer;
+  padding: 10px 12px;
+  color: #52525b;
+  font-size: 13px;
+}
+
+@media (max-width: 768px) {
+  .generation-status {
+    top: 68px;
+  }
+}

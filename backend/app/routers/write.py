@@ -12,7 +12,7 @@ from ..utils import ok
 from ..services.llm import stream_text_from_llm
 from ..services.prompt_builder import build_prompt, build_selection_edit_prompt
 from ..services.kng_rag_service import get_kng_rag_service
-from ..agent.manager import ActiveRunError, get_agent_run_manager
+from ..agent.runtime.manager import ActiveRunError, get_agent_run_manager
 from ..agent.schemas import CreateAgentRunRequest
 
 router = APIRouter(prefix="/write", tags=["write"])
