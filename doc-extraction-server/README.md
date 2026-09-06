@@ -185,7 +185,8 @@ print(resp.json())
 - 字段提取依赖 LLM API（`model.ic.h3i.buaa.edu.cn`），需要该服务可访问
 - PDF 解析使用已部署的 MinerU Router 服务，默认地址为 `https://37cb31.xhang.buaa.edu.cn:52811`
 - 可通过 `MINERU_API_URL` 和 `MINERU_VLM_URL` 覆盖 MinerU 地址；服务内部使用 `/tasks` 异步提交、轮询并读取 Markdown 结果
-- A800 部署可额外启用第一页重点区域 OCR，以补充扫描 PDF 的字段识别；OCR 运行时依赖及模型体积较大，不随仓库提交，需在服务器环境单独安装并配置。
-- 未安装 OCR 依赖时，字段提取服务仍使用 MinerU 解析正文和字段提取链路，不应将 OCR wheel、模型或上传样本提交到仓库。
+- A800 部署可额外启用第一页重点区域 OCR，以补充扫描 PDF 的字段识别；服务器侧需单独安装 `PyMuPDF`、`rapidocr_onnxruntime`、`numpy`、`Pillow` 及 RapidOCR 模型文件。
+- OCR 依赖和模型体积较大，不写入本服务 `requirements.txt`，也不随仓库提交；未安装 OCR 依赖时，字段提取服务仍使用 MinerU 解析正文和字段提取链路。
+- 不应将 OCR wheel、模型或上传样本提交到仓库。
 - 部署时确保 8050 端口未被占用：`ss -tlnp | grep 8050`
 - 如使用 p2p-proxy 对外暴露，需确保 p2p-proxy 服务端已配置好对应的 clientId 和 machineCode
