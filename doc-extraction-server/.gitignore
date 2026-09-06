@@ -2,4 +2,7 @@ venv/
 __pycache__/
 *.pyc
 .env
+upload/
 uploads/
+ocr-wheels/
+*.onnx

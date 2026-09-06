@@ -146,6 +146,26 @@ $result.fields | Format-Table
 
 ---
 
+## 内容审查接口
+
+### POST /api/documents/file-guard
+
+接收 `filename` 和 `content_base64`，解析文件后返回敏感内容、不规范表述和错别字检查结果。解析正文只在本次请求中使用，不作为独立字段持久化返回。
+
+### POST /api/documents/text-guard
+
+接收如下 JSON：
+
+```json
+{
+  "text": "待审查文本"
+}
+```
+
+返回风险信息、问题列表、修正后的文本以及质量检查异常信息。
+
+---
+
 ## 注意事项
 
 1. **Base64 编码**: 文件内容需编码为 Base64 字符串，建议文件不超过 50MB（编码后约膨胀 37%）
