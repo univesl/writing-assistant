@@ -1,9 +1,16 @@
 from datetime import datetime
+from pathlib import Path
+
+from dotenv import load_dotenv
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+
+
+# 字段提取服务独立部署时，配置文件位于项目根目录；必须在导入路由和服务模块前加载。
+load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=False)
 
 from .routers import official_document_extractions as official_document_extractions_router
 

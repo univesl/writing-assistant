@@ -11,13 +11,9 @@ from typing import Dict, List
 from dataclasses import dataclass, field
 from pathlib import Path
 import requests
-from dotenv import load_dotenv
 
 
-load_dotenv()
-
-
-# 预定义模型配置（从 test_and_call_models.py 和 test_qwen.py 收集）
+# 预定义模型配置（使用h3i平台）
 def _field_base_url() -> str:
     api_url = os.getenv("FIELD_EXTRACTION_API_URL") or os.getenv("LLM_API_URL")
     if api_url:
@@ -117,9 +113,9 @@ class FieldExtractor:
         """通过模型名称快速创建提取器
         
         Args:
-            model_name: 模型名称，默认使用 FIELD_EXTRACTION_MODEL_ID 配置的模型
+            model_name: 模型名称，默认使用 qwen2.5-72b (Qwen2.5-72B-Instruct)
         """
-        # 默认使用 .env 中配置的字段提取模型
+        # 默认使用 Qwen2.5-72B 模型（与文档生成保持一致）
         if model_name is None:
             model_name = FIELD_EXTRACTION_MODEL_ID
         
@@ -222,7 +218,7 @@ class FieldExtractor:
 - 文件标题：提取具体的、语义相关的标题，如"关于开展XX工作的通知"。不要提取通用模板性文字如"北京航空航天大学文件"、"XX单位文件"等。
 - 来文字号：必须与原文格式完全一致，包括所有标点符号（如〔〕、[]、【】等），不得篡改或转换。
 - 日期：提取标准的年月日格式（如"2024年3月15日"或"2024-03-15"），不能只写数字如"20240315"或"201458"。
-- 时间节点：提取文档中所有截止时间、完成时限、上报期限、会议时间、执行期限等关键时间信息。时间仅保留到日期级别（如"5月30日下午4点开会"简化为"5月30日"），不包含具体事项。如有多个时间节点，用分号分隔。
+- 时间节点：详细提取文档中所有截止时间、完成时限、上报期限、会议时间、执行期限等。格式为"时间+事项要求"，例如"2024年3月15日前：完成材料报送"、"5月1日前：提交总结报告"。如有多个时间节点，用分号分隔。
 - 紧急程度：从文档中找到对应的关键词（如特急、急件、加急、平件等）。
 - 来文单位：提取完整的发文单位名称。
 
