@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import AgentRunPanel from '../agent/AgentRunPanel'
+import { isActiveAgentRun } from '../../utils/agentRun'
 
 function MainContent({
   currentSession,
@@ -14,7 +15,9 @@ function MainContent({
 }) {
   const [chatInput, setChatInput] = useState('')
   const [displayChatHistory, setDisplayChatHistory] = useState([])
+  const [agentDetailsOpen, setAgentDetailsOpen] = useState(false)
   const currentSessionId = currentSession?.id || null
+  const agentActive = isActiveAgentRun(agentRun)
 
   useEffect(() => {
     if (chatHistory && chatHistory.length > 0) {
@@ -24,6 +27,11 @@ function MainContent({
     }
   }, [chatHistory, currentSessionId])
 
+  // 打开运行详情承载实时状态，避免页面顶部出现独立的加载浮层。
+  useEffect(() => {
+    if (agentActive) setAgentDetailsOpen(true)
+  }, [agentActive, agentRun?.run_id])
+
   const lastUserMessageIndex = displayChatHistory
     .map(message => message.role === 'user')
     .lastIndexOf(true)
@@ -31,8 +39,16 @@ function MainContent({
   const renderAgentDetails = () => {
     if (!agentRun) return null
     return (
-      <details className="agent-details">
-        <summary>运行详情</summary>
+      <details
+        className="agent-details"
+        open={agentDetailsOpen}
+        onToggle={(event) => setAgentDetailsOpen(event.currentTarget.open)}
+      >
+        <summary>
+          {agentActive && <span className="agent-details-spinner" aria-hidden="true" />}
+          <span>运行详情</span>
+          {agentActive && <span className="agent-details-status">运行中</span>}
+        </summary>
         <AgentRunPanel
           run={agentRun}
           events={agentEvents}

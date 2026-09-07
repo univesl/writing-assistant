@@ -82,7 +82,6 @@ function App() {
   } = useSessionState()
   const {
     activeAgentSessionIds,
-    activeTaskCount,
     beginSessionTask,
     cancelAgentRun,
     connectAgentRun,
@@ -569,23 +568,6 @@ function App() {
 
   return (
     <div className="app-container">
-      {activeTaskCount > 0 && (
-        <div
-          className="generation-status"
-          role="status"
-          aria-live="polite"
-          aria-atomic="true"
-          data-testid="generation-status"
-        >
-          <span className="generation-status-spinner" aria-hidden="true" />
-          <div className="generation-status-copy">
-            <strong>
-              {activeTaskCount > 1 ? `正在处理 ${activeTaskCount} 个会话` : '正在处理'}
-            </strong>
-            <span>{currentTask?.message || (currentAgentActive ? 'Agent 正在后台处理当前正文…' : '其他会话正在后台处理…')}</span>
-          </div>
-        </div>
-      )}
       <div ref={layoutRef} className={`main-layout ${isSidebarOpen ? '' : 'sidebar-closed'}`}>
         <Sidebar
           sessions={sessions}

@@ -71,7 +71,9 @@ export default function AgentRunPanel({ run, events = [], onCancel, onRetry }) {
     <div className="agent-run-panel" aria-live="polite">
       <div className="agent-run-header">
         <div>
-          <strong>{isProposal ? '候选稿' : STATUS_LABELS[run.status] || run.status}</strong>
+          <strong className="agent-run-status">
+            <span>{isProposal ? '候选稿' : STATUS_LABELS[run.status] || run.status}</span>
+          </strong>
           <span>{STAGE_LABELS[run.current_stage] || run.current_stage || '准备中'}</span>
         </div>
         {active && <button onClick={() => onCancel?.(run)} className="agent-secondary-btn">取消</button>}
