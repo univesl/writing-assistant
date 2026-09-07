@@ -1,7 +1,6 @@
-import { useCallback, useEffect } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import '../styles/app.css'
 import '../styles/agent.css'
-import TopNav from '../components/session/TopNav'
 import Sidebar from '../components/session/Sidebar'
 import MainContent from '../components/editor/MainContent'
 import EditorSidebar from '../components/editor/EditorSidebar'
@@ -17,6 +16,45 @@ import { formatSessionTime } from '../utils/sessionTime'
 import { useAgentRuns } from './useAgentRuns'
 import { useGenerationFlow } from './useGenerationFlow'
 import { useSessionState } from './useSessionState'
+
+const PANEL_WIDTHS = {
+  sidebar: { min: 180, max: 360, default: 240 },
+  editor: { min: 320, defaultRatio: 0.52 },
+}
+const MIN_MAIN_CONTENT_WIDTH = 360
+const RESIZE_HANDLE_WIDTH = 16
+
+const getEditorBounds = (
+  viewportWidth = window.innerWidth,
+  availableMax = Number.POSITIVE_INFINITY,
+) => {
+  const min = Math.max(PANEL_WIDTHS.editor.min, Math.round(viewportWidth / 3))
+  const ratioMax = Math.round(viewportWidth * 0.6)
+  const max = Math.max(min, Math.min(ratioMax, availableMax))
+  return { min, max }
+}
+
+const getDefaultEditorWidth = (viewportWidth = window.innerWidth, sidebarWidth = PANEL_WIDTHS.sidebar.default) => {
+  const availableMax = viewportWidth - sidebarWidth - MIN_MAIN_CONTENT_WIDTH - RESIZE_HANDLE_WIDTH
+  const bounds = getEditorBounds(viewportWidth, availableMax)
+  return Math.round(Math.min(bounds.max, Math.max(bounds.min, viewportWidth * PANEL_WIDTHS.editor.defaultRatio)))
+}
+
+const readPanelWidth = (storageKey, panelKey, fallback, availableMax = Number.POSITIVE_INFINITY) => {
+  const value = Number(window.localStorage.getItem(storageKey))
+  if (!Number.isFinite(value)) return fallback
+  if (panelKey === 'editor' && [360, 520].includes(value)) return fallback
+  const bounds = panelKey === 'editor' ? getEditorBounds(window.innerWidth, availableMax) : PANEL_WIDTHS[panelKey]
+  return Math.min(bounds.max, Math.max(bounds.min, value))
+}
+
+const clampPanelWidth = (value, key, availableMax, viewportWidth = window.innerWidth) => {
+  const bounds = key === 'editor'
+    ? getEditorBounds(viewportWidth, availableMax)
+    : PANEL_WIDTHS[key]
+  const max = Math.max(bounds.min, Math.min(bounds.max, availableMax))
+  return Math.round(Math.min(max, Math.max(bounds.min, value)))
+}
 
 function App() {
   const {
@@ -67,6 +105,108 @@ function App() {
     setCurrentPage,
     setCurrentChatHistory,
   })
+
+  const [sidebarWidth, setSidebarWidth] = useState(() => readPanelWidth('sidebarWidth', 'sidebar', PANEL_WIDTHS.sidebar.default))
+  const [editorPanelWidth, setEditorPanelWidth] = useState(() => {
+    const initialSidebarWidth = readPanelWidth('sidebarWidth', 'sidebar', PANEL_WIDTHS.sidebar.default)
+    const availableMax = window.innerWidth - initialSidebarWidth - MIN_MAIN_CONTENT_WIDTH - RESIZE_HANDLE_WIDTH
+    return readPanelWidth(
+      'editorPanelWidth',
+      'editor',
+      getDefaultEditorWidth(window.innerWidth, initialSidebarWidth),
+      availableMax,
+    )
+  })
+  const layoutRef = useRef(null)
+  const panelResizeRef = useRef(null)
+  const sidebarWidthRef = useRef(sidebarWidth)
+  const editorPanelWidthRef = useRef(editorPanelWidth)
+  const layoutWidth = window.innerWidth
+  const availableEditorMax = layoutWidth - sidebarWidth - MIN_MAIN_CONTENT_WIDTH - RESIZE_HANDLE_WIDTH
+  const editorBounds = getEditorBounds(layoutWidth, availableEditorMax)
+  const effectiveEditorPanelWidth = clampPanelWidth(
+    editorPanelWidth,
+    'editor',
+    availableEditorMax,
+    layoutWidth,
+  )
+
+  useEffect(() => {
+    sidebarWidthRef.current = sidebarWidth
+    window.localStorage.setItem('sidebarWidth', String(sidebarWidth))
+  }, [sidebarWidth])
+
+  useEffect(() => {
+    editorPanelWidthRef.current = editorPanelWidth
+    window.localStorage.setItem('editorPanelWidth', String(editorPanelWidth))
+  }, [editorPanelWidth])
+
+  useEffect(() => {
+    const nextWidth = clampPanelWidth(
+      editorPanelWidth,
+      'editor',
+      window.innerWidth - sidebarWidth - MIN_MAIN_CONTENT_WIDTH - RESIZE_HANDLE_WIDTH,
+      window.innerWidth,
+    )
+    if (nextWidth !== editorPanelWidth) {
+      setEditorPanelWidth(nextWidth)
+    }
+  }, [editorPanelWidth, sidebarWidth])
+
+  const startPanelResize = (panel, event) => {
+    if (window.innerWidth <= 768) return
+    event.preventDefault()
+    panelResizeRef.current = {
+      panel,
+      startX: event.clientX,
+      startWidth: panel === 'sidebar' ? sidebarWidthRef.current : editorPanelWidthRef.current,
+    }
+    event.currentTarget.setPointerCapture?.(event.pointerId)
+    document.body.classList.add('panel-resizing')
+  }
+
+  const resetPanelWidth = (panel) => {
+    if (panel === 'sidebar') {
+      setSidebarWidth(PANEL_WIDTHS.sidebar.default)
+    } else {
+      setEditorPanelWidth(getDefaultEditorWidth(window.innerWidth, sidebarWidthRef.current))
+    }
+  }
+
+  useEffect(() => {
+    const handlePointerMove = (event) => {
+      const resize = panelResizeRef.current
+      if (!resize) return
+
+      const layoutWidth = layoutRef.current?.getBoundingClientRect().width || window.innerWidth
+      const availableForPanel = layoutWidth - MIN_MAIN_CONTENT_WIDTH - RESIZE_HANDLE_WIDTH
+      const delta = event.clientX - resize.startX
+
+      if (resize.panel === 'sidebar') {
+        const maxWidth = availableForPanel - editorPanelWidthRef.current
+        setSidebarWidth(clampPanelWidth(resize.startWidth + delta, 'sidebar', maxWidth))
+      } else {
+        const maxWidth = availableForPanel - sidebarWidthRef.current
+        setEditorPanelWidth(clampPanelWidth(resize.startWidth - delta, 'editor', maxWidth, layoutWidth))
+      }
+    }
+
+    const stopPanelResize = () => {
+      if (!panelResizeRef.current) return
+      panelResizeRef.current = null
+      document.body.classList.remove('panel-resizing')
+    }
+
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', stopPanelResize)
+    window.addEventListener('pointercancel', stopPanelResize)
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', stopPanelResize)
+      window.removeEventListener('pointercancel', stopPanelResize)
+      document.body.classList.remove('panel-resizing')
+    }
+  }, [])
 
   // 加载会话列表
   const loadSessions = useCallback(async () => {
@@ -429,7 +569,6 @@ function App() {
 
   return (
     <div className="app-container">
-      <TopNav />
       {activeTaskCount > 0 && (
         <div
           className="generation-status"
@@ -447,7 +586,7 @@ function App() {
           </div>
         </div>
       )}
-      <div className={`main-layout ${isSidebarOpen ? '' : 'sidebar-closed'}`}>
+      <div ref={layoutRef} className={`main-layout ${isSidebarOpen ? '' : 'sidebar-closed'}`}>
         <Sidebar
           sessions={sessions}
           currentSession={currentSession}
@@ -457,7 +596,22 @@ function App() {
           onRenameSession={handleRenameSession}
           isOpen={isSidebarOpen}
           activeRunSessionIds={activeAgentSessionIds}
+          style={{ '--sidebar-width': `${sidebarWidth}px` }}
         />
+        {isSidebarOpen && (
+          <div
+            className="panel-resize-handle sidebar-panel-resizer"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="调整会话栏宽度"
+            aria-valuemin={PANEL_WIDTHS.sidebar.min}
+            aria-valuemax={PANEL_WIDTHS.sidebar.max}
+            aria-valuenow={sidebarWidth}
+            onPointerDown={(event) => startPanelResize('sidebar', event)}
+            onDoubleClick={() => resetPanelWidth('sidebar')}
+            title="拖动调整会话栏宽度，双击恢复默认"
+          />
+        )}
         {currentSession ? (
           currentPage === 'start' ? (
             <StartPage
@@ -488,6 +642,18 @@ function App() {
                 onAgentRetry={handleAgentRetry}
                 onAgentMessage={handleAgentMessage}
               />
+              <div
+                className="panel-resize-handle editor-panel-resizer"
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="调整对话栏和编辑器宽度"
+                aria-valuemin={editorBounds.min}
+                aria-valuemax={editorBounds.max}
+                aria-valuenow={effectiveEditorPanelWidth}
+                onPointerDown={(event) => startPanelResize('editor', event)}
+                onDoubleClick={() => resetPanelWidth('editor')}
+                title="拖动调整编辑器宽度，双击恢复默认"
+              />
               <EditorSidebar
                 key={`editor-${currentSession.id}`}
                 currentSession={currentSession}
@@ -502,6 +668,7 @@ function App() {
                 onTaskFinish={endSessionTask}
                 isSessionActive={(sessionId) => sessionId === currentSessionIdRef.current}
                 onAgentSelectionMessage={handleAgentSelectionMessage}
+                style={{ '--editor-width': `${effectiveEditorPanelWidth}px` }}
               />
             </>
           )

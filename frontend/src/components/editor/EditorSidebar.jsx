@@ -35,6 +35,7 @@ function EditorSidebar({
   onTaskFinish,
   isSessionActive,
   onAgentSelectionMessage,
+  style,
 }) {
   const [editorContent, setEditorContent] = useState('')
   const [isSaving, setIsSaving] = useState(false)
@@ -473,7 +474,7 @@ function EditorSidebar({
   }
 
   return (
-    <div className="editor-sidebar">
+    <div className="editor-sidebar" style={style}>
       {showAIDialog && (
         <AiEditDialog
           boundaryRef={contentRef}

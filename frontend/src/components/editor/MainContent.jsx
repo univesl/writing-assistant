@@ -24,6 +24,25 @@ function MainContent({
     }
   }, [chatHistory, currentSessionId])
 
+  const lastUserMessageIndex = displayChatHistory
+    .map(message => message.role === 'user')
+    .lastIndexOf(true)
+
+  const renderAgentDetails = () => {
+    if (!agentRun) return null
+    return (
+      <details className="agent-details">
+        <summary>运行详情</summary>
+        <AgentRunPanel
+          run={agentRun}
+          events={agentEvents}
+          onCancel={onAgentCancel}
+          onRetry={onAgentRetry}
+        />
+      </details>
+    )
+  }
+
   const handleEditSubmit = async () => {
     if (!currentSession || isBusy || !chatInput.trim()) {
       return
@@ -57,30 +76,23 @@ function MainContent({
       </div>
       <div className="chat-history">
         {displayChatHistory.map((message, index) => (
-          <div key={index} className={`chat-message ${message.role}`}>
-            <div className="message-content">
-              <div className="message-header">
-                <span className="message-role">
-                  {message.role === 'user' ? '你' : 'AI'}
-                </span>
-              </div>
-              <div className="message-text">
-                {message.content}
+          <React.Fragment key={`message-${index}`}>
+            <div className={`chat-message ${message.role}`}>
+              <div className="message-content">
+                <div className="message-header">
+                  <span className="message-role">
+                    {message.role === 'user' ? '你' : 'AI'}
+                  </span>
+                </div>
+                <div className="message-text">
+                  {message.content}
+                </div>
               </div>
             </div>
-          </div>
+            {agentRun && index === lastUserMessageIndex && renderAgentDetails()}
+          </React.Fragment>
         ))}
-        {agentRun && (
-          <details className="agent-details" open={['queued', 'running'].includes(agentRun.status)}>
-            <summary>运行详情</summary>
-            <AgentRunPanel
-              run={agentRun}
-              events={agentEvents}
-              onCancel={onAgentCancel}
-              onRetry={onAgentRetry}
-            />
-          </details>
-        )}
+        {agentRun && lastUserMessageIndex < 0 && renderAgentDetails()}
       </div>
       <div className="chat-input-container">
         <div className="chat-input-box">

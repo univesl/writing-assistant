@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-function Sidebar({ sessions, currentSession, onSessionChange, onNewSession, onDeleteSession, onRenameSession, activeRunSessionIds = [] }) {
+function Sidebar({ sessions, currentSession, onSessionChange, onNewSession, onDeleteSession, onRenameSession, activeRunSessionIds = [], style }) {
   const [renameMode, setRenameMode] = useState(null)
   const [renameInput, setRenameInput] = useState('')
 
@@ -32,7 +32,7 @@ function Sidebar({ sessions, currentSession, onSessionChange, onNewSession, onDe
   }
 
   return (
-    <div className="sidebar">
+    <div className="sidebar" style={style}>
       <button className="new-session-btn" onClick={handleNewSession}>
         + 新建会话
       </button>

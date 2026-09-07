@@ -920,3 +920,28 @@
   line-height: 1.5;
 }
 
+/* Width is controlled by the desktop workspace splitter. */
+.editor-sidebar {
+  flex: 0 0 var(--editor-width, 640px);
+  width: var(--editor-width, 640px);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.editor-main {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.editor-footer {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+@media (max-width: 768px) {
+  .editor-sidebar {
+    width: 100%;
+    flex: 0 0 auto;
+  }
+}
+

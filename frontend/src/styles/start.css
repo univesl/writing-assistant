@@ -258,6 +258,22 @@
   margin-bottom: 24px;
 }
 
+/* Keep the writing-mode choices compact in the wider workspace. */
+.start-page-body {
+  max-width: 960px;
+  padding-left: 16px;
+  padding-right: 16px;
+}
+
+.mode-cards {
+  gap: 12px;
+}
+
+.mode-card {
+  gap: 12px;
+  padding: 16px;
+}
+
 .template-manager-header {
   display: flex;
   align-items: center;
