@@ -31,12 +31,13 @@ class DocumentExtractionApiContractTests(unittest.TestCase):
         self.assertEqual(response.status_code, 201)
         self.assertEqual(
             set(response.json()),
-            {"filename", "file_type", "content_length", "fields", "parsed_content"},
+            {"filename", "file_type", "content_length", "fields"},
         )
-        self.assertIsNone(response.json()["parsed_content"])
+        self.assertNotIn("parsed_content", response.json())
         mock_extract.assert_called_once_with(
             filename="公文.pdf",
             content_base64="JVBERg==",
+            model_name="qwen2.5-72b",
             include_parsed_content=False,
         )
 
@@ -61,6 +62,7 @@ class DocumentExtractionApiContractTests(unittest.TestCase):
         mock_extract.assert_called_once_with(
             filename="公文.pdf",
             content_base64="JVBERg==",
+            model_name="qwen2.5-72b",
             include_parsed_content=True,
         )
 

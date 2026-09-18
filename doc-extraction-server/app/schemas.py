@@ -141,6 +141,9 @@ class DocumentFileGuardOut(BaseModel):
     file_type: str
     content_length: int
     review: DocumentFileGuardReview
+    # 审查所基于的解析文本：issues 的 start/end 偏移以此为锚定基准，
+    # 调用方高亮定位时应以该文本（或在其自有文本中检索 original）为参照
+    parsed_content: Optional[str] = None
 
 
 class DocumentTextGuardIn(BaseModel):

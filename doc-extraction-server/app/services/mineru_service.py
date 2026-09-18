@@ -13,7 +13,7 @@ load_dotenv()
 DEFAULT_MINERU_API_URL = "https://37cb31.xhang.buaa.edu.cn:52811"
 MINERU_API_URL = os.getenv("MINERU_API_URL", DEFAULT_MINERU_API_URL).strip().rstrip("/")
 MINERU_VLM_URL = os.getenv("MINERU_VLM_URL", MINERU_API_URL).strip().rstrip("/")
-MINERU_REQUEST_TIMEOUT = float(os.getenv("MINERU_REQUEST_TIMEOUT", "60"))
+MINERU_REQUEST_TIMEOUT = float(os.getenv("MINERU_REQUEST_TIMEOUT", "180"))
 MINERU_PARSE_TIMEOUT = float(os.getenv("MINERU_PARSE_TIMEOUT", "600"))
 MINERU_POLL_INTERVAL = float(os.getenv("MINERU_POLL_INTERVAL", "2"))
 

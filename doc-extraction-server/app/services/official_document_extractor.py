@@ -13,12 +13,16 @@ from .document_processor import (
     is_supported_file,
     parse_document,
 )
+from .region_ocr import extract_first_page_top_left
+
+
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "./upload"))
 GUARD_API_URL = os.getenv("GUARD_API_URL", "https://07b503.xhang.buaa.edu.cn:52811/guard")
-GUARD_API_TIMEOUT = float(os.getenv("GUARD_API_TIMEOUT", "30"))
-NONSTANDARD_API_URL = os.getenv("NONSTANDARD_API_URL", "https://07b503.xhang.buaa.edu.cn:52811/nonstandard")
-TYPO_API_URL = os.getenv("TYPO_API_URL", "https://07b503.xhang.buaa.edu.cn:52811/typo")
-QUALITY_API_TIMEOUT = float(os.getenv("QUALITY_API_TIMEOUT", "60"))
+GUARD_API_TIMEOUT = float(os.getenv("GUARD_API_TIMEOUT", "180"))
+NONSTANDARD_API_URL = os.getenv("NONSTANDARD_API_URL", "https://07b503.xhang.buaa.edu.cn:52811/api/v1/nonstandard-expression/check")
+TYPO_API_URL = os.getenv("TYPO_API_URL", "https://07b503.xhang.buaa.edu.cn:52811/api/v1/typo-punctuation/check")
+QUALITY_API_TIMEOUT = float(os.getenv("QUALITY_API_TIMEOUT", "180"))
+QUALITY_API_KEY = os.getenv("QUALITY_API_KEY", "")
 
 
 class UnsupportedFileTypeError(Exception):
@@ -49,11 +53,19 @@ def extract_from_base64(
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     file_path.write_bytes(file_bytes)
 
-    parsed_content = parse_document(file_path)
+    ocr_result = {"text": "", "confidence": 0.0, "error": "仅对 PDF 启用"}
+    if Path(filename).suffix.lower() == ".pdf":
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            parsed_future = executor.submit(parse_document, file_path)
+            ocr_future = executor.submit(extract_first_page_top_left, file_path)
+            parsed_content = parsed_future.result()
+            ocr_result = ocr_future.result()
+    else:
+        parsed_content = parse_document(file_path)
     if not parsed_content:
         raise DocumentParseError("文档解析失败")
 
-    extracted_fields = extract_fields_from_content(parsed_content, model_name)
+    extracted_fields = extract_fields_from_content(parsed_content, model_name, ocr_result.get("text", ""))
 
     result = {
         "filename": filename,
@@ -96,6 +108,7 @@ def guard_file_from_base64(filename: str, content_base64: str) -> dict:
             "file_type": get_file_type(filename),
             "content_length": len(parsed_content),
             "review": review_text(parsed_content),
+            "parsed_content": parsed_content,
         }
     finally:
         if temp_path is not None:
@@ -117,7 +130,7 @@ def _call_sensitive_guard(text: str) -> dict[str, Any]:
 
 def _call_quality_api(url: str, text: str, category: str) -> tuple[list, str, str | None]:
     try:
-        response = requests.post(url, json={"text": text}, timeout=QUALITY_API_TIMEOUT)
+        response = requests.post(url, headers={"X-API-Key": QUALITY_API_KEY} if QUALITY_API_KEY else None, json={"text": text}, timeout=QUALITY_API_TIMEOUT)
         response.raise_for_status()
         result = response.json()
         issues = []

@@ -25,10 +25,10 @@ cd /home/liubin/writing-assistant/doc-extraction-server
 ### 1.3 检查服务是否运行
 
 ```bash
-curl -s http://localhost:8050/api/health | python3 -m json.tool
+curl -s http://localhost:8050/api/documents/models | python3 -m json.tool
 ```
 
-正常应返回 `status: ok`。
+正常应返回可用模型列表。
 
 ---
 
@@ -61,7 +61,28 @@ curl -s http://localhost:8050/api/health | python3 -m json.tool
 **Base URL**（公网）：`https://85af8f.xhang.buaa.edu.cn:52811`（通过 p2p-proxy 穿透）
 **Base URL**（通过 p2p-proxy 暴露后）：由 p2p-proxy 输出的公网地址决定
 
-### 3.2 提取字段
+### 3.2 获取可用模型
+
+```
+GET /api/documents/models
+Content-Type: application/json
+```
+
+响应示例：
+```json
+{
+  "models": [
+    {"name": "qwen2.5-72b", "display_name": "Qwen2.5-72B (本地)"},
+    {"name": "qwen3-235b", "display_name": "Qwen3-235B (本地)"},
+    {"name": "qwen3-235b-h3i", "display_name": "Qwen3-235B (推荐)"},
+    {"name": "qwen3.5-397b", "display_name": "Qwen3.5-397B"},
+    {"name": "qwen2.5-72b-h3i", "display_name": "Qwen2.5-72B"},
+    {"name": "deepseek-r1-70b", "display_name": "DeepSeek-R1-70B"}
+  ]
+}
+```
+
+### 3.3 提取字段
 
 ```
 POST /api/documents/extractions
@@ -74,6 +95,7 @@ Content-Type: application/json
 |------|------|------|------|
 | `filename` | 是 | string | 文件名（含扩展名，如 report.pdf） |
 | `content_base64` | 是 | string | 文件内容的 Base64 编码 |
+| `model_name` | 否 | string | 提取模型，默认 `qwen2.5-72b` |
 | `include_parsed_content` | 否 | boolean | 是否返回解析正文，默认 `false` |
 
 **成功响应**（HTTP 201）：
@@ -82,6 +104,7 @@ Content-Type: application/json
 {
   "filename": "xxx.pdf",
   "file_type": "pdf",
+  "model_name": "qwen2.5-72b",
   "content_length": 1632,
   "fields": {
     "文件标题": "...",
@@ -101,24 +124,6 @@ Content-Type: application/json
 
 未识别到的字段值返回空字符串。
 
-### 3.3 内容审查
-
-文件审查接口：
-
-```
-POST /api/documents/file-guard
-```
-
-请求体使用 `filename` 和 `content_base64`，返回敏感内容、不规范表述和错别字检查结果。
-
-文本审查接口：
-
-```
-POST /api/documents/text-guard
-```
-
-请求体为 `{ "text": "待审查文本" }`，返回风险信息、问题列表和修正后的文本。
-
 ### 3.4 支持的文件类型
 
 `pdf`、`docx`、`md`、`txt`
@@ -134,7 +139,8 @@ curl -X POST http://10.70.247.28:8050/api/documents/extractions \
   -H "Content-Type: application/json" \
   -d '{
     "filename": "公文.pdf",
-    "content_base64": "'"$(base64 -w0 /path/to/公文.pdf)"'"
+    "content_base64": "'"$(base64 -w0 /path/to/公文.pdf)"'",
+    "model_name": "qwen2.5-72b"
   }'
 ```
 
@@ -142,7 +148,7 @@ curl -X POST http://10.70.247.28:8050/api/documents/extractions \
 
 ```powershell
 $fileBase64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes('C:\path\to\公文.pdf'))
-$body = @{ filename="公文.pdf"; content_base64=$fileBase64 } | ConvertTo-Json
+$body = @{ filename="公文.pdf"; content_base64=$fileBase64; model_name="qwen2.5-72b" } | ConvertTo-Json
 Invoke-RestMethod -Uri "http://10.70.247.28:8050/api/documents/extractions" -Method Post -Body $body -ContentType "application/json"
 ```
 
@@ -156,7 +162,7 @@ with open("公文.pdf", "rb") as f:
 
 resp = requests.post(
     "http://10.70.247.28:8050/api/documents/extractions",
-    json={"filename": "公文.pdf", "content_base64": b64},
+    json={"filename": "公文.pdf", "content_base64": b64, "model_name": "qwen2.5-72b"},
     timeout=300,
 )
 print(resp.json())
@@ -169,7 +175,7 @@ print(resp.json())
 用户上传的文件会保存在服务器以下目录：
 
 ```
-/home/liubin/writing-assistant/doc-extraction-server/upload/
+/home/liubin/writing-assistant/doc-extraction-server/uploads/
 ```
 
 - 每次调用字段提取接口，文件都会保存到此目录
@@ -185,8 +191,5 @@ print(resp.json())
 - 字段提取依赖 LLM API（`model.ic.h3i.buaa.edu.cn`），需要该服务可访问
 - PDF 解析使用已部署的 MinerU Router 服务，默认地址为 `https://37cb31.xhang.buaa.edu.cn:52811`
 - 可通过 `MINERU_API_URL` 和 `MINERU_VLM_URL` 覆盖 MinerU 地址；服务内部使用 `/tasks` 异步提交、轮询并读取 Markdown 结果
-- A800 部署可额外启用第一页重点区域 OCR，以补充扫描 PDF 的字段识别；服务器侧需单独安装 `PyMuPDF`、`rapidocr_onnxruntime`、`numpy`、`Pillow` 及 RapidOCR 模型文件。
-- OCR 依赖和模型体积较大，不写入本服务 `requirements.txt`，也不随仓库提交；未安装 OCR 依赖时，字段提取服务仍使用 MinerU 解析正文和字段提取链路。
-- 不应将 OCR wheel、模型或上传样本提交到仓库。
 - 部署时确保 8050 端口未被占用：`ss -tlnp | grep 8050`
 - 如使用 p2p-proxy 对外暴露，需确保 p2p-proxy 服务端已配置好对应的 clientId 和 machineCode
