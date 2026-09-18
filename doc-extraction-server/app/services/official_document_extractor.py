@@ -43,41 +43,47 @@ def extract_from_base64(
     model_name: str = "qwen2.5-72b",
     include_parsed_content: bool = False,
 ) -> dict:
-    """从 Base64 编码的文件内容提取公文字段，文件会保存到 upload 目录"""
+    """从 Base64 编码的文件内容提取公文字段；文件仅存临时目录，用后即删（2026-09-18 起不再持久化到 upload/）"""
     if not is_supported_file(filename):
         raise UnsupportedFileTypeError("不支持的文件类型，请上传 PDF、DOCX、MD 或 TXT 文件")
 
     file_bytes = base64.b64decode(content_base64)
-    safe_filename = filename.replace("..", "_").replace("/", "_")
-    file_path = UPLOAD_DIR / safe_filename
-    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    file_path.write_bytes(file_bytes)
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            prefix="doc-extract-", suffix=Path(filename).suffix.lower(), delete=False
+        ) as temp_file:
+            temp_file.write(file_bytes)
+            temp_path = Path(temp_file.name)
 
-    ocr_result = {"text": "", "confidence": 0.0, "error": "仅对 PDF 启用"}
-    if Path(filename).suffix.lower() == ".pdf":
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            parsed_future = executor.submit(parse_document, file_path)
-            ocr_future = executor.submit(extract_first_page_top_left, file_path)
-            parsed_content = parsed_future.result()
-            ocr_result = ocr_future.result()
-    else:
-        parsed_content = parse_document(file_path)
-    if not parsed_content:
-        raise DocumentParseError("文档解析失败")
+        ocr_result = {"text": "", "confidence": 0.0, "error": "仅对 PDF 启用"}
+        if Path(filename).suffix.lower() == ".pdf":
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                parsed_future = executor.submit(parse_document, temp_path)
+                ocr_future = executor.submit(extract_first_page_top_left, temp_path)
+                parsed_content = parsed_future.result()
+                ocr_result = ocr_future.result()
+        else:
+            parsed_content = parse_document(temp_path)
+        if not parsed_content:
+            raise DocumentParseError("文档解析失败")
 
-    extracted_fields = extract_fields_from_content(parsed_content, model_name, ocr_result.get("text", ""))
+        extracted_fields = extract_fields_from_content(parsed_content, model_name, ocr_result.get("text", ""))
 
-    result = {
-        "filename": filename,
-        "file_type": get_file_type(filename),
-        "content_length": len(parsed_content),
-        "fields": extracted_fields,
-    }
+        result = {
+            "filename": filename,
+            "file_type": get_file_type(filename),
+            "content_length": len(parsed_content),
+            "fields": extracted_fields,
+        }
 
-    if include_parsed_content:
-        result["parsed_content"] = parsed_content
+        if include_parsed_content:
+            result["parsed_content"] = parsed_content
 
-    return result
+        return result
+    finally:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
 
 
 def guard_file_from_base64(filename: str, content_base64: str) -> dict:
