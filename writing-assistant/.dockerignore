@@ -1,0 +1,41 @@
+# VCS
+.git
+.gitignore
+
+# 遗留目录（旧分支的嵌套拷贝 / 空目录），不进镜像
+writing-assistant/
+skill/
+docs/
+
+# Frontend
+node_modules
+**/node_modules
+**/dist
+
+# Python
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.venv
+**/venv
+
+# Env / secrets（env.example 保留，供参考）
+.env
+.env.*
+!env.example
+
+# SQLite / checkpoint artifacts
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db
+*.db-shm
+*.db-wal
+
+# Misc
+.DS_Store
+*.log
+.trae/
+.idea
+.vscode

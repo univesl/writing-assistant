@@ -233,12 +233,27 @@ export function parseSelectionEditOutput(
   }
 }
 
+export function formatReferenceLabel(reference) {
+  const value = String(reference || '')
+    .trim()
+    .replace(/^[-*+]\s+/, '')
+    .replace(/^\[\d+\]\s*/, '')
+    .trim()
+  if (!value) return ''
+
+  const pathParts = value.split(/[\\/]+/).filter(Boolean)
+  return pathParts.at(-1)?.trim() || value
+}
+
 export function sortKnowledgeReferences(references = []) {
   const uniqueReferences = [...new Set(
-    references.filter(Boolean).map(reference => String(reference).trim()).filter(Boolean)
+    references
+      .filter(reference => typeof reference === 'string')
+      .map(reference => reference.trim())
+      .filter(Boolean)
   )]
 
-  return uniqueReferences
+  const sortedReferences = uniqueReferences
     .map((reference, index) => ({
       reference,
       index,
@@ -253,7 +268,10 @@ export function sortKnowledgeReferences(references = []) {
       if (right.number) return 1
       return left.index - right.index
     })
-    .map(item => item.reference)
+    .map(item => formatReferenceLabel(item.reference))
+    .filter(Boolean)
+
+  return [...new Set(sortedReferences)]
 }
 
 export function appendKnowledgeSources(summary, references = []) {
@@ -311,9 +329,6 @@ export function appendSseChunk(
       }
       if (data.rag) {
         nextMetadata = { ...nextMetadata, rag: data.rag }
-      }
-      if (data.finish) {
-        nextMetadata = { ...nextMetadata, finish: true }
       }
     } catch (error) {
       console.error('Parse error:', error)

@@ -1,0 +1,47 @@
+profiles:
+  active-openai-compatible:
+    label: 当前模型
+    label_from_model: true
+    id_from_model: true
+    provider: openai_compatible
+    model_env: LLM_MODEL_NAME
+    model_default: deepseek-v4-flash
+    base_url_env: LLM_API_URL
+    api_key_env: LLM_API_KEY
+    enabled_env: LLM_API_KEY
+    # Keep the generic OpenAI-compatible profile conservative. Structured
+    # output is handled by the adapter's JSON-schema prompt fallback.
+    capabilities: [streaming]
+  glm5-1-default:
+    label: GLM-5.1（BeAI Cloud）
+    provider: openai_compatible
+    model_env: GLM_API_MODEL
+    model_default: GLM5.1-PD_e8Qi79Xa102U2FnQ
+    base_url_env: GLM_API_URL
+    api_key_env: GLM_API_KEY
+    enabled_env: GLM_API_KEY
+    capabilities: [streaming]
+  openai-responses:
+    label: OpenAI Responses
+    provider: openai_responses
+    model_env: OPENAI_MODEL
+    model_default: gpt-5.4-mini
+    api_key_env: OPENAI_API_KEY
+    enabled_env: OPENAI_API_KEY
+    capabilities: [streaming, structured_output, tool_calling, reasoning]
+  anthropic-default:
+    label: Anthropic Claude
+    provider: anthropic
+    model_env: ANTHROPIC_MODEL
+    model_default: claude-sonnet-4-6
+    api_key_env: ANTHROPIC_API_KEY
+    enabled_env: ANTHROPIC_API_KEY
+    capabilities: [streaming, structured_output, tool_calling, reasoning]
+  gemini-default:
+    label: Google Gemini
+    provider: google_genai
+    model_env: GOOGLE_MODEL
+    model_default: gemini-2.5-flash
+    api_key_env: GOOGLE_API_KEY
+    enabled_env: GOOGLE_API_KEY
+    capabilities: [streaming, structured_output, tool_calling]

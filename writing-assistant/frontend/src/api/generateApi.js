@@ -47,7 +47,7 @@ export const generateApi = {
     return response
   },
 
-  // 参考写作（流式）：回函/仿写/基于内容生成
+  // 参考写作（流式）：回函/底稿微调/基于内容生成
   referenceWrite: async (data) => {
     const response = await axios.post('/generate/reference-write', data, {
       timeout: 120000,

@@ -3,8 +3,6 @@
 基于 KnG RAG 检索生成公文
 """
 
-import asyncio
-import json
 import os
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -93,7 +91,7 @@ async def generate_document_endpoint(
 
 @router.post("/reference-write")
 async def reference_write(request: ReferenceWriteRequest):
-    """参考写作（流式）：根据上传文件进行回函/仿写/基于内容生成"""
+    """参考写作（流式）：根据上传文件进行回函/底稿微调/基于内容生成"""
     return StreamingResponse(
         generate_reference_document(
             reference_content=request.reference_content,
@@ -120,54 +118,21 @@ async def reference_write_files(
     use_knowledge_base: bool = Form(False),
     top_k: int = Form(3),
 ):
-    """参考写作（多文件）：文件仅在当前请求的临时目录中存在。
+    """参考写作（多文件）：文件仅在当前请求的临时目录中存在。"""
+    try:
+        materials = await parse_reference_uploads(files)
+    except ReferenceMaterialError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    流协议（SSE）：
-    - {"type":"parse","index":i,"total":n,"filename":...}（含 heartbeat 心跳）
-    - {"type":"chunk","content":...} 生成正文
-    - {"type":"done"} 正常结束 / {"type":"error","message":...} 失败
-    """
-    def _sse_frame(obj: dict) -> str:
-        return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
+    reference_content = format_reference_materials(materials)
+    reference_filename = summarize_reference_filenames(materials)
+    print(
+        f"[reference-write] session={session_id}, files={len(materials)}, "
+        f"parsed_chars={len(reference_content)}"
+    )
 
-    async def event_stream():
-        queue: asyncio.Queue = asyncio.Queue()
-
-        async def progress(event: dict):
-            await queue.put(event)
-
-        parse_task = asyncio.create_task(
-            parse_reference_uploads(files, progress=progress)
-        )
-
-        # 解析阶段：进度事件 + 心跳（上限由前端控制）
-        while True:
-            if parse_task.done():
-                break
-            try:
-                event = await asyncio.wait_for(queue.get(), timeout=10)
-                yield _sse_frame(event)
-            except asyncio.TimeoutError:
-                yield _sse_frame({"type": "parse", "heartbeat": True})
-
-        try:
-            materials = parse_task.result()
-        except ReferenceMaterialError as exc:
-            yield _sse_frame({"type": "error", "message": str(exc)})
-            return
-        except Exception as exc:
-            print(f"[reference-write] 解析异常: {exc}")
-            yield _sse_frame({"type": "error", "message": "参考材料解析失败"})
-            return
-
-        reference_content = format_reference_materials(materials)
-        reference_filename = summarize_reference_filenames(materials)
-        print(
-            f"[reference-write] session={session_id}, files={len(materials)}, "
-            f"parsed_chars={len(reference_content)}"
-        )
-
-        async for chunk in generate_reference_document(
+    return StreamingResponse(
+        generate_reference_document(
             reference_content=reference_content,
             reference_filename=reference_filename,
             generate_type=generate_type,
@@ -176,12 +141,9 @@ async def reference_write_files(
             model_name=model_name,
             use_knowledge_base=use_knowledge_base,
             top_k=top_k,
-        ):
-            yield _sse_frame({"type": "chunk", "content": chunk})
-
-        yield _sse_frame({"type": "done"})
-
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+        ),
+        media_type="text/event-stream",
+    )
 
 
 @router.get("/models")

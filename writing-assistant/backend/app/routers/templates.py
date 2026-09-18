@@ -5,6 +5,9 @@
 
 import os
 import shutil
+import tempfile
+import zipfile
+from pathlib import Path
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, UploadFile, File, Form
@@ -52,18 +55,35 @@ async def upload_template(
         return err(400, "仅支持 .docx 格式的模板文件")
 
     # 生成存储文件名（时间戳 + 原始文件名）
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    storage_filename = f"{timestamp}_{file.filename}"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    safe_original = Path(file.filename).name
+    storage_filename = f"{timestamp}_{safe_original}"
     file_path = os.path.join(TEMPLATES_DIR, storage_filename)
 
     # 保存文件
     os.makedirs(TEMPLATES_DIR, exist_ok=True)
     content = await file.read()
+    if not content:
+        return err(400, "模板文件为空")
+    if len(content) > 20 * 1024 * 1024:
+        return err(400, "模板文件不能超过 20 MB")
+    with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as probe:
+        probe.write(content)
+        probe_path = probe.name
+    try:
+        if not zipfile.is_zipfile(probe_path):
+            return err(400, "模板不是有效的 DOCX 文件")
+        with zipfile.ZipFile(probe_path) as archive:
+            required_parts = {"[Content_Types].xml", "word/document.xml", "word/styles.xml"}
+            if not required_parts.issubset(set(archive.namelist())):
+                return err(400, "模板缺少必要的 Word 文档结构")
+    finally:
+        os.unlink(probe_path)
     with open(file_path, 'wb') as f:
         f.write(content)
 
     # 使用文件名（不含扩展名）作为模板名称
-    template_name = name.strip() or os.path.splitext(file.filename)[0]
+    template_name = name.strip() or os.path.splitext(safe_original)[0]
 
     # 创建数据库记录
     t = Template(
@@ -92,8 +112,9 @@ def delete_template(template_id: int, db: OrmSession = Depends(get_db)):
     was_default = t.is_default
 
     # 删除文件
-    file_path = os.path.join(TEMPLATES_DIR, t.filename)
-    if os.path.exists(file_path):
+    templates_root = Path(TEMPLATES_DIR).resolve()
+    file_path = (templates_root / Path(t.filename).name).resolve()
+    if templates_root in file_path.parents and Path(t.filename).name == t.filename and file_path.exists():
         os.remove(file_path)
 
     # 删除数据库记录

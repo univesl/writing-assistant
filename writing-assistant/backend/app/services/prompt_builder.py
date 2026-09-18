@@ -24,7 +24,7 @@ def _current_official_date_text() -> str:
 
 GLOBAL_WRITING_CONTRACT = """【事实与材料边界】
 1. 具体单位、人员、日期、文号、数字、政策依据、职责、措施和结果，只能来自用户要求、用户明确指定为事实依据的上传材料或直接相关的 KnG 内容；通用知识只用于写法。
-2. 用户要求优先。仿写材料默认提供结构和语言，不自动成为新稿事实；只有用户明确要求沿用材料事实时才按要求使用。“参考、仿写、参考结构、改成新年份”本身不授权复制或改造参考稿事实。不得把旧年份、旧文号或旧事项机械改成新值。
+2. 用户要求优先。底稿微调材料默认提供主底稿和支持依据；只有用户明确要求沿用材料事实时才按要求使用。“参考、微调、参考结构、改成新年份”本身不授权复制或改造参考稿事实。不得把旧年份、旧文号或旧事项机械改成新值。
 3. 保持来源的语义强度和状态：“拟、计划、将”不写成已完成，“建议、希望”不升级成命令，“配合、协助”不升级成负责或牵头。
 4. 缺少具体事实时不得补造看似合理的值。时间、地点或办理渠道确属核心执行条件且用户需要完整待填稿时，才使用 `[待补充：字段名]`；其他非核心信息自然省略。用户明确要求不写或不留占位时完全省略。
 5. 用户要求结合某项规划、政策或制度，但材料和 KnG 没有提供其具体内容时，不得凭常识编造条款、文号、指标和部署；只作不含具体事实的克制表达，并在 SUMMARY 提醒依据不足。
@@ -82,8 +82,8 @@ MODE_RULES = {
 以前端选择的文体和用户本轮要求为准直接起草。文体为“通用公文”时，根据任务目的自行判断最合适的正式文稿类型和结构，不输出判断过程。""",
     "reply": """【写作模式：根据来文生成回函】
 上传材料是需要回应的来文和事实依据。综合全部材料，按来文实际事项逐项回应；来文单位、标题、文号、诉求、办理结果和答复立场必须有来源，缺失时不得套用虚构信息。""",
-    "imitate": """【写作模式：仿写公文】
-用户明确指定输出文体时优先执行；未指定时，结合用户目标和全部材料自行判断。学习材料的主要层级、段落功能、编号方式、展开程度、语气和篇幅量级。用户要求参考行文结构时，不得无故删除主要分节、把完整长文压成提纲或把短文扩成空泛长文。保留结构功能而非机械复制标题数量；姓名、单位、日期、文号、数字和具体事项默认不复制，除非用户明确要求作为新稿事实。参考稿开头同时出现“发文机关+文件”和正式题名时，前者只是红头版式，ARTICLE 只把后者作为唯一一级标题。参考稿的红头名称、发文字号、联系人和电话、签发信息、印发机关、印发日期及印数属于旧稿发布元数据，用户未逐项明确提供新值时一律不输出。图片链接、二维码 OCR、页眉页脚和印发版记默认不进入新稿。""",
+    "imitate": """【写作模式：底稿微调】
+用户明确指定主底稿时优先执行；未指定时，选择最接近目标文稿的一份材料作为主底稿。先保留主底稿的主要层级、段落功能、编号方式、展开程度、语气和篇幅量级，再按用户要求做局部修改。姓名、单位、日期、文号、数字和具体事项默认不顺手替换，除非用户明确要求作为新稿事实。参考稿开头同时出现“发文机关+文件”和正式题名时，前者只是红头版式，ARTICLE 只把后者作为唯一一级标题。参考稿的红头名称、发文字号、联系人和电话、签发信息、印发机关、印发日期及印数属于旧稿发布元数据，用户未逐项明确提供新值时一律不输出。图片链接、二维码 OCR、页眉页脚和印发版记默认不进入新稿。""",
     "general_ref": """【写作模式：基于材料生成】
 用户要求决定最终文体和用途，上传材料主要提供事实、背景和观点，不强制沿用原材料文体。综合全部文件并保留各自的主体、时间状态和观点边界，按用户意图重组。材料只有“应、需、将、发生时”等要求或条件时，改写成报告也必须保持要求或待落实状态，不得写成“已检查、已整改、已开展、已建立”及其成效。图片链接、二维码 OCR、页眉页脚和印发版记默认不作为新稿正文。""",
 }
@@ -114,20 +114,9 @@ _LENGTH_MAX_RE = re.compile(r"(?:不超过|至多|控制在)\s*(\d{2,5})\s*(?:�
 _LENGTH_MIN_RE = re.compile(r"(?:不少于|至少)\s*(\d{2,5})\s*(?:个)?字")
 _DURATION_RE = re.compile(r"(?<!\d)(\d+(?:\.\d+)?)\s*分钟")
 
-# 用户未提字数时按文体惯例控制的默认区间（依据语料统计，可调参）
-DEFAULT_LENGTH_BANDS = {
-    "notice": (600, 1500),
-    "regulation": (2500, 4000),
-    "speech": (1500, 2500),
-    "general": None,
-}
 
-
-def _build_length_instruction(requirements: str, style: str = "general") -> str:
-    """把篇幅要求换成模型更容易执行的正文边界。
-
-    用户明确提到字数时，生成硬性范围；未提字数时按文体惯例给出默认区间。
-    """
+def _build_length_instruction(requirements: str) -> str:
+    """把自由文本中的篇幅要求换成模型更容易执行的正文边界。"""
     text = _as_text(requirements)
 
     range_match = _LENGTH_RANGE_RE.search(text)
@@ -135,9 +124,8 @@ def _build_length_instruction(requirements: str, style: str = "general") -> str:
         lower, upper = sorted((int(range_match.group(1)), int(range_match.group(2))))
         return (
             "【本次篇幅目标】\n"
-            f"ARTICLE 正文必须控制在 {lower}—{upper} 个中文字符之间（不含标记和摘要）。"
-            "写作前按已有信息模块分配篇幅，接近上限时提前收尾；不得超出上限，"
-            "也不得为凑字数重复内容或新增业务事实。"
+            f"ARTICLE 正文（不含标记和摘要）尽量控制在 {lower}—{upper} 个中文字符。"
+            "写作前按已有信息模块分配篇幅，只展开一次；不得把字数理解为 token 数，也不得重复栏目或新增业务事实凑字数。"
         )
 
     maximum_match = _LENGTH_MAX_RE.search(text)
@@ -145,8 +133,8 @@ def _build_length_instruction(requirements: str, style: str = "general") -> str:
         upper = int(maximum_match.group(1))
         return (
             "【本次篇幅目标】\n"
-            f"ARTICLE 正文不得超过 {upper} 个中文字符（不含标记和摘要）。"
-            "接近上限时提前收尾，不得超出；也不得为控制字数删减用户要求覆盖的事项。"
+            f"ARTICLE 正文不得超过约 {upper} 个中文字符（不含标记和摘要）。"
+            "在事实完整的前提下简洁收束，篇幅上限不授权新增事实。"
         )
 
     minimum_match = _LENGTH_MIN_RE.search(text)
@@ -155,7 +143,7 @@ def _build_length_instruction(requirements: str, style: str = "general") -> str:
         upper = round(lower * 1.2)
         return (
             "【本次篇幅目标】\n"
-            f"ARTICLE 正文不得少于 {lower} 个中文字符（不含标记和摘要），目标 {lower}—{upper} 字。"
+            f"ARTICLE 正文目标为 {lower}—{upper} 个中文字符（不含标记和摘要）。"
             "通过完整使用已有内容、阐释已知关系和合理分段达到目标，不得新增业务事实。"
         )
 
@@ -166,9 +154,9 @@ def _build_length_instruction(requirements: str, style: str = "general") -> str:
         upper = round(target * 1.15)
         return (
             "【本次篇幅目标】\n"
-            f"用户要求约 {target} 字；ARTICLE 正文必须控制在 {lower}—{upper} 个中文字符"
-            "（不含标记和摘要）。写作前按已有信息模块分配篇幅并只展开一次，接近上限时提前收尾；"
-            "不得超出上限，也不得重复同一事实或新增业务事实凑字数。"
+            f"用户要求约 {target} 字；ARTICLE 正文尽量控制在 {lower}—{upper} 个中文字符"
+            "（不含标记和摘要）。写作前按已有信息模块分配篇幅并只展开一次；"
+            "不得把字数理解为 token 数，不得重复同一事实或新增业务事实。"
         )
 
     duration_match = _DURATION_RE.search(text)
@@ -178,19 +166,8 @@ def _build_length_instruction(requirements: str, style: str = "general") -> str:
         upper = round(minutes * 280)
         return (
             "【本次篇幅目标】\n"
-            f"用户要求约 {minutes:g} 分钟；按每分钟约 220—280 个中文字符，ARTICLE 正文"
-            f"必须控制在 {lower}—{upper} 个中文字符（不含标记和摘要）。"
-            "用完整阐释、现场过渡和自然收束达到朗读长度，接近上限时提前收尾，不新增业务事实。"
-        )
-
-    band = DEFAULT_LENGTH_BANDS.get(style)
-    if band:
-        lower, upper = band
-        return (
-            "【本次篇幅目标】\n"
-            f"用户未指定字数。按{STYLE_CARDS[style]['name']}惯例，ARTICLE 正文应控制在"
-            f"约 {lower}—{upper} 个中文字符（不含标记和摘要）。内容完整优先，"
-            "接近上限时收尾，不得为凑篇幅重复或新增业务事实。"
+            f"用户要求约 {minutes:g} 分钟；按每分钟约 220—280 个中文字符，ARTICLE 正文目标为"
+            f" {lower}—{upper} 个中文字符（不含标记和摘要）。用完整阐释、现场过渡和自然收束达到朗读长度，不新增业务事实。"
         )
 
     return ""
@@ -220,7 +197,7 @@ def _compose_generation_prompt(
     mode_name = {
         "quick": "快速写作",
         "reply": "生成回函",
-        "imitate": "仿写公文",
+        "imitate": "底稿微调",
         "general_ref": "基于材料生成",
     }[mode]
     if mode == "quick":
@@ -569,7 +546,7 @@ def _build_final_generation_check(data: Dict[str, Any], mode: str, style: str) -
     ]
     if mode == "imitate":
         lines.append(
-            "2. 当前是仿写：参考稿中的年份、文号、日期、数字和具体事项默认只是样稿事实。"
+            "2. 当前是底稿微调：参考稿中的年份、文号、日期、数字和具体事项默认只是底稿事实。"
             "用户要求写新年份，只授权新稿标题、任务时态和落款按要求调整，不授权把参考稿文号、制度文号、备案年份或其他历史数字机械改成新年份；无新依据时省略或保持抽象。"
             "新稿年份不得与备案、成立、发布、获批、发生、完成等历史状态拼接；用户或 KnG 未明确提供新事实时，删除该年份而不是替换旧年份。"
             "用户没有明确给出新发文字号时，ARTICLE 中不得出现任何 `〔年份〕编号` 文号；若草稿中出现，删除文号整行。"
@@ -611,7 +588,7 @@ def _build_generation_user_content(data: Dict[str, Any], mode: str, style: str) 
     reference_usage = {
         "quick": "按用户要求直接写作。",
         "reply": "上传材料是需要回应的来文；只回应其中真实存在的事项。",
-        "imitate": "综合全部材料学习结构与语言，由用户要求决定新稿内容。",
+        "imitate": "选定主底稿做局部修改，其余材料只作为明确补充依据或风格参考。",
         "general_ref": "以用户要求为目标，综合全部材料事实重新组织。",
     }[mode]
     if mode == "quick":
@@ -653,8 +630,7 @@ def build_prompt(
         selected_style = style if style in VALID_STYLES else "general"
         generation_style = selected_style if mode == "quick" else "general"
         length_instruction = _build_length_instruction(
-            _as_text(prompt_data.get("user_requirements")),
-            generation_style,
+            _as_text(prompt_data.get("user_requirements"))
         )
         return [
             {

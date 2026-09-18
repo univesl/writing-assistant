@@ -1,0 +1,5 @@
+display_name: 北航公文内容写作
+short_description: 起草、改写和审校北京航空航天大学校内公文正文。
+default_prompt: 请说明要写的文种、事项、对象、已有材料和希望输出的形式。
+policy:
+  allow_implicit_invocation: true

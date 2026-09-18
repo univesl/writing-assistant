@@ -1,4 +1,4 @@
-# LLM系统API客户端（支持h3i平台）
+# LLM系统API客户端（2026-09-16 移除 h3i 平台支持，仅 OpenAI 兼容接口）
 import requests
 import json
 import re
@@ -20,7 +20,7 @@ def _chat_base_url() -> str:
     api_url = os.getenv("LLM_API_URL")
     if api_url:
         return api_url.rstrip("/")
-    base = os.getenv("MODEL_API_BASE", "http://model.ic.h3i.buaa.edu.cn").rstrip("/")
+    base = os.getenv("MODEL_API_BASE", "").rstrip("/")
     return base if base.endswith("/v1") else f"{base}/v1"
 
 
@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 
 class LLMAPIClient:
-    """LLM模型API客户端（使用h3i平台）"""
+    """LLM模型API客户端（OpenAI 兼容接口）"""
     
     def __init__(self):
         if OpenAI is None:
