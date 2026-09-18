@@ -98,12 +98,12 @@ async def generate_document_async(
     }
 
 
-# LLM API 配置（使用h3i平台）
+# LLM API 配置（2026-09-16 移除 h3i 平台默认值，部署环境必须显式配置 LLM_API_URL）
 def _chat_api_url() -> str:
     api_url = os.getenv("LLM_API_URL")
     if api_url:
         return api_url.rstrip("/")
-    base = os.getenv("MODEL_API_BASE", "http://model.ic.h3i.buaa.edu.cn").rstrip("/")
+    base = os.getenv("MODEL_API_BASE", "").rstrip("/")
     return base if base.endswith("/v1") else f"{base}/v1"
 
 

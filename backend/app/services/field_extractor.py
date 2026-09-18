@@ -7,18 +7,19 @@
 import json
 import re
 import os
+import time
 from typing import Dict, List
 from dataclasses import dataclass, field
 from pathlib import Path
 import requests
 
 
-# 预定义模型配置（使用h3i平台）
+# 预定义模型配置（2026-09-16 移除 h3i 平台默认值，部署环境必须显式配置 FIELD_EXTRACTION_API_URL）
 def _field_base_url() -> str:
     api_url = os.getenv("FIELD_EXTRACTION_API_URL") or os.getenv("LLM_API_URL")
     if api_url:
         return api_url.rstrip("/")
-    base = os.getenv("FIELD_EXTRACTION_API_BASE") or os.getenv("MODEL_API_BASE", "http://model.ic.h3i.buaa.edu.cn")
+    base = os.getenv("FIELD_EXTRACTION_API_BASE") or os.getenv("MODEL_API_BASE", "")
     base = base.rstrip("/")
     return base if base.endswith("/v1") else f"{base}/v1"
 
@@ -227,36 +228,59 @@ class FieldExtractor:
 
 只返回JSON，不要返回其他内容。"""
 
-        try:
-            response = requests.post(
-                f"{self.llm_config['base_url']}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {self.llm_config.get('api_key', '')}",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "model": self.llm_config.get("model", "xhang_nlp_qwen2.5-72b"),
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": truncated}
-                    ],
-                    "temperature": 0.1,
-                    "max_tokens": 2000
-                },
-                timeout=FIELD_EXTRACTION_TIMEOUT
-            )
+        # 2026-09-16: 对上游瞬时故障(限流/网关超时/网络抖动)自动重试，避免静默返回空字段
+        retryable_status = {429, 500, 502, 503, 504}
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = requests.post(
+                    f"{self.llm_config['base_url']}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {self.llm_config.get('api_key', '')}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "model": self.llm_config.get("model", "GLM5.2-FP8_dpQ4saJqACejWnD9"),
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": truncated}
+                        ],
+                        "temperature": 0.1,
+                        "max_tokens": 4000
+                    },
+                    timeout=FIELD_EXTRACTION_TIMEOUT
+                )
 
-            if response.status_code == 200:
-                result = response.json()
-                text = result.get("choices", [{}])[0].get("message", {}).get("content", "")
-                return self._parse_llm_response(text, fields)
+                if response.status_code == 200:
+                    result = response.json()
+                    message = result.get("choices", [{}])[0].get("message", {})
+                    text = message.get("content") or ""
+                    parsed = self._parse_llm_response(text, fields)
+                    if any(parsed.values()) or attempt >= max_attempts:
+                        return parsed
+                    # GLM 思考过程较长时可能耗尽 max_tokens 导致正文为空，重试
+                    print(f"[字段提取] 模型返回空结果（第 {attempt}/{max_attempts} 次，重试）")
+                    time.sleep(3)
+                    continue
 
-            print(f"[字段提取] API 返回错误: {response.status_code}")
-            return {f.name: "" for f in fields}
+                if response.status_code in retryable_status and attempt < max_attempts:
+                    print(f"[字段提取] API 返回错误: {response.status_code}（第 {attempt}/{max_attempts} 次，稍后重试）")
+                    time.sleep(5 * attempt)
+                    continue
 
-        except Exception as e:
-            print(f"[字段提取] LLM提取失败: {e}")
-            return {f.name: "" for f in fields}
+                print(f"[字段提取] API 返回错误: {response.status_code}")
+                return {f.name: "" for f in fields}
+
+            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                if attempt < max_attempts:
+                    print(f"[字段提取] 网络异常: {e}（第 {attempt}/{max_attempts} 次，稍后重试）")
+                    time.sleep(5 * attempt)
+                    continue
+                print(f"[字段提取] LLM提取失败: {e}")
+                return {f.name: "" for f in fields}
+            except Exception as e:
+                print(f"[字段提取] LLM提取失败: {e}")
+                return {f.name: "" for f in fields}
 
     def _parse_llm_response(self, text: str, fields: List[FieldDef]) -> Dict[str, str]:
         """解析 LLM 返回"""

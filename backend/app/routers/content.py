@@ -16,6 +16,7 @@ from ..models import DocumentRevision, Session as SessionModel, Content as Conte
 from ..utils import ok, err, dt_str
 from ..schemas import SaveArticleIn
 from ..services.mineru_service import mineru_service
+from ..services.document_processor import strip_markdown_escapes
 
 router = APIRouter(prefix="/content", tags=["content"])
 
@@ -175,7 +176,7 @@ async def _process_docx(content_bytes: bytes, filename: str) -> str:
 
     try:
         result = subprocess.run(
-            ['pandoc', '-f', 'docx', '-t', 'markdown', '-o', md_temp_path, docx_temp_path],
+            ['pandoc', '-f', 'docx', '-t', 'plain', '--wrap=none', '-o', md_temp_path, docx_temp_path],
             capture_output=True,
             text=True,
             timeout=30
@@ -183,7 +184,7 @@ async def _process_docx(content_bytes: bytes, filename: str) -> str:
 
         if result.returncode == 0 and os.path.exists(md_temp_path):
             with open(md_temp_path, 'r', encoding='utf-8') as f:
-                return f.read()
+                return strip_markdown_escapes(f.read())
         else:
             print(f"[DEBUG] Pandoc转换docx失败: {result.stderr}")
             return ""

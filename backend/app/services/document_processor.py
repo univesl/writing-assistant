@@ -5,7 +5,9 @@
 """
 
 import json
+import html
 import os
+import re
 import shutil
 from pathlib import Path
 from typing import Dict, Optional
@@ -57,21 +59,108 @@ def decode_uploaded_text(content: bytes) -> str:
     raise UnicodeError("文本编码无法识别，请将文件保存为 UTF-8 或 GB18030 后重试")
 
 
+# pandoc/MinerU 转 markdown 时会给 _ @ " 等字符加转义反斜杠（如 zhang\_san\@x.com、\"引号\"），
+# 下游错别字/标点检查会把转义符误判为原文错误，解析后统一还原。
+_MD_ESCAPE_RE = re.compile(r'\\([\\`*_{}\[\]()#+\-.!|\"<>~$%&/,;:?@])')
+
+# markdown 语法标记（粗体、斜体、标题、列表、链接、图片、行内代码、HTML、表格）不属于正文，
+# MinerU(PDF) 输出的 markdown 保留这些标记，进入检查会被报"多余星号/方括号/竖线"等幻影错误
+_MD_BOLD_RE = re.compile(r'(\*\*|__)(?=\S)(.+?)(?<=\S)\1')
+# 斜体仅剥离"短且无空白、含中文、两侧非数字"的星号包裹（MinerU 强调中文术语），
+# 避免 5*6=30、a*b*c 这类字面星号被误删
+_MD_ITALIC_RE = re.compile(r'(?<![\d*])\*([^*\s]{1,30}[\u4e00-\u9fff][^*\s]{0,30})\*(?!\d)')
+_MD_HEADING_RE = re.compile(r'^#{1,6}\s+', re.M)
+_MD_LIST_RE = re.compile(r'^\s*([-*+]|\d+[.、])\s+', re.M)
+_MD_LINK_RE = re.compile(r'\[([^\]]*)\]\([^)]*\)')
+_MD_IMAGE_RE = re.compile(r'!\[[^\]]*\]\([^)]*\)')
+_MD_CODE_RE = re.compile(r'`([^`\n]+)`')
+_MD_HTML_BR_RE = re.compile(r'<br\s*/?>', re.I)
+_MD_HTML_TAG_RE = re.compile(r'</?[a-zA-Z][^<>]*>')
+# pandoc -t plain 会把 docx 表格渲染成 ASCII 网格（-------- 边框 + 空格填充）
+_ASCII_BORDER_RE = re.compile(r'^\s*-+(?:\s+-+)*\s*$')
+
+
+def strip_markdown_escapes(text: Optional[str]) -> Optional[str]:
+    """还原 pandoc/MinerU markdown 输出中的转义反斜杠"""
+    if not text:
+        return text
+    return _MD_ESCAPE_RE.sub(r'\1', text)
+
+
+def _flatten_pipe_tables(text: str) -> str:
+    """markdown 管道表格（|a|b|）转为制表符分隔的纯文本行"""
+    if '|' not in text:
+        return text
+    out = []
+    for line in text.split('\n'):
+        s = line.strip()
+        if s.startswith('|') and s.endswith('|') and len(s) > 1:
+            cells = [c.strip() for c in s[1:-1].split('|')]
+            if cells and all(re.fullmatch(r':?-{2,}:?', c) for c in cells):
+                continue
+            out.append('\t'.join(cells))
+        else:
+            out.append(line)
+    return '\n'.join(out)
+
+
+def flatten_ascii_tables(text: Optional[str]) -> Optional[str]:
+    """pandoc plain 输出的 ASCII 表格还原为制表符分隔行（丢弃边框线）"""
+    if not text:
+        return text
+    lines = text.split('\n')
+    if not any(_ASCII_BORDER_RE.match(line) for line in lines):
+        return text
+    out, in_table = [], False
+    for line in lines:
+        if _ASCII_BORDER_RE.match(line):
+            in_table = True
+            continue
+        if in_table:
+            if not line.strip():
+                in_table = False
+                out.append(line)
+            else:
+                out.append(re.sub(r'\s{2,}', '\t', line.strip()))
+        else:
+            out.append(line)
+    return '\n'.join(out)
+
+
+def strip_markdown_syntax(text: Optional[str]) -> Optional[str]:
+    """剥离 markdown 语法标记，只保留正文文字（用于 MinerU 等 markdown 输出的清洗）"""
+    if not text:
+        return text
+    text = _MD_HTML_BR_RE.sub('\n', text)
+    text = _MD_IMAGE_RE.sub('', text)
+    text = _MD_LINK_RE.sub(r'\1', text)
+    text = _MD_CODE_RE.sub(r'\1', text)
+    text = _MD_BOLD_RE.sub(r'\2', text)
+    text = _MD_ITALIC_RE.sub(r'\1', text)
+    text = _MD_HEADING_RE.sub('', text)
+    text = _MD_LIST_RE.sub('', text)
+    text = _MD_HTML_TAG_RE.sub('', text)
+    text = html.unescape(text)
+    text = _flatten_pipe_tables(text)
+    return text
+
+
 def parse_document(file_path: Path) -> Optional[str]:
     """
-    解析文档为 Markdown
+    解析文档为纯文本（保留段落分隔）
     支持 PDF、DOCX、MD、TXT
     """
     file_extension = file_path.suffix.lower()
-    
+
     try:
         if file_extension == '.pdf':
-            return mineru_service.parse_pdf_to_markdown(str(file_path))
+            md = mineru_service.parse_pdf_to_markdown(str(file_path))
+            return strip_markdown_syntax(strip_markdown_escapes(md))
         elif file_extension == '.docx':
             import subprocess
-            md_temp_path = str(file_path) + '.md'
+            md_temp_path = str(file_path) + '.txt'
             result = subprocess.run(
-                ['pandoc', '-f', 'docx', '-t', 'markdown', '-o', md_temp_path, str(file_path)],
+                ['pandoc', '-f', 'docx', '-t', 'plain', '--wrap=none', '-o', md_temp_path, str(file_path)],
                 capture_output=True,
                 text=True,
                 timeout=30
@@ -80,7 +169,7 @@ def parse_document(file_path: Path) -> Optional[str]:
                 with open(md_temp_path, 'r', encoding='utf-8') as f:
                     content = f.read()
                 os.unlink(md_temp_path)
-                return content
+                return flatten_ascii_tables(content)
             return None
         elif file_extension in {'.md', '.txt'}:
             with open(file_path, 'rb') as f:
