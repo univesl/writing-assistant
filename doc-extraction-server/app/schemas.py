@@ -156,6 +156,25 @@ class DocumentTextGuardOut(DocumentFileGuardReview):
     pass
 
 
+class BatchTextGuardItemIn(BaseModel):
+    """批量文本审查请求条目"""
+    id: str = Field(..., min_length=1, max_length=128, description="调用方自定义请求标识，响应原样带回作为 key")
+    text: str = Field(..., min_length=1, description="待审查文本")
+
+
+class BatchTextGuardIn(BaseModel):
+    """批量文本审查请求"""
+    items: list[BatchTextGuardItemIn] = Field(..., min_length=1, max_length=20, description="批量条目，上限 20 条")
+
+
+class BatchItemOut(BaseModel):
+    """批量文本审查单条结果"""
+    success: bool
+    error: str = ""
+    code: Optional[str] = None
+    review: Optional[DocumentTextGuardOut] = None
+
+
 class ExtractionModelListOut(BaseModel):
     """字段提取模型列表"""
     models: list[str]

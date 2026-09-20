@@ -7,6 +7,8 @@ from ..schemas import (
     DocumentTextGuardOut,
     DocumentExtractionIn,
     DocumentExtractionOut,
+    BatchTextGuardIn,
+    BatchItemOut,
 )
 from ..services.official_document_extractor import (
     DocumentGuardError,
@@ -61,3 +63,28 @@ def guard_document_text(request: DocumentTextGuardIn):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except DocumentGuardError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post("/text-guard/batch")
+def batch_guard_text(request: BatchTextGuardIn):
+    """批量文本审查：逐条执行并按调用方 id 返回各自结果，单条失败不影响其他条。
+
+    耗时与条目数线性相关（内部串行排队，每条约 2-4 秒），20 条约 40-80 秒，
+    调用方超时建议 >= 300 秒。
+    """
+    ids = [item.id for item in request.items]
+    if len(ids) != len(set(ids)):
+        raise HTTPException(status_code=422, detail="items 中存在重复的 id")
+
+    results: dict = {}
+    for item in request.items:
+        try:
+            review = review_text(item.text)
+            results[item.id] = BatchItemOut(success=True, error="", code=None, review=review)
+        except DocumentParseError as exc:
+            results[item.id] = BatchItemOut(success=False, error=str(exc), code="VALIDATION", review=None)
+        except DocumentGuardError as exc:
+            results[item.id] = BatchItemOut(success=False, error=str(exc), code="GUARD_UNAVAILABLE", review=None)
+        except Exception:
+            results[item.id] = BatchItemOut(success=False, error="服务内部错误", code="INTERNAL", review=None)
+    return results
