@@ -30,9 +30,6 @@ app.add_middleware(
 )
 
 app.include_router(official_document_extractions_router.router, prefix="/api")
-# 签发系统契约端点：POST /api/v1/sign/batch-submit
-app.include_router(official_document_extractions_router.sign_router, prefix="/api/v1/sign")
-
 
 @app.get("/api/health")
 def health():
