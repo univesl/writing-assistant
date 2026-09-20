@@ -175,10 +175,85 @@ POST /api/documents/text-guard
 |--------|------|
 | 422 | 文本为空或参数校验失败 |
 
-### 批量文本审查
+### 批量文本审查（签发系统契约端点）
 
 ```txt
-POST /api/documents/text-guard/batch
+POST /api/v1/sign/batch-submit
+```
+
+一次请求审查多条文本。请求体为「调用方自定义 id → 待审文本」的映射，响应按相同 id 回带各自的审查结果；单条失败不影响其他条目。审查字段平铺在每个 id 下（字段含义同第 4 节）。
+
+#### 请求示例
+
+```json
+{
+    "id1": "请程书记副发",
+    "id2": "请程书记副发"
+}
+```
+
+#### 请求字段
+
+| 字段 | 必填 | 类型 | 说明 |
+|------|------|------|------|
+| （自定义 id） | 是 | string | 调用方自定义幂等键，长度 ≤ 64，响应原样带回作为 key；值为待审查文本，1-5000 字符 |
+
+限制：最多 20 条。
+
+#### 成功响应（HTTP 200）
+
+```json
+{
+    "id1": {
+        "harmful": "false",
+        "harmful_type": "normal",
+        "harmful_type_label": "无",
+        "harmful_reason": "该文本为正常工作沟通内容，不涉及敏感信息。",
+        "harmful_words": "",
+        "harmful_degree": "none",
+        "harmful_degree_label": "无",
+        "confidence": "low",
+        "confidence_label": "低",
+        "highlight_spans": [],
+        "stage": null,
+        "issues": [
+            {
+                "start": 4,
+                "end": 6,
+                "original": "副发",
+                "suggestion": "发言",
+                "error_type": "typo",
+                "message": "必须改：根据语境，"副发"应为"发言"的错别字。",
+                "source": "nonstandard",
+                "confidence": "high"
+            }
+        ],
+        "corrected": "请程书记发言",
+        "typo_check_error": null
+    },
+    "id2": { "…": "同上结构" }
+}
+```
+
+#### 条目失败语义
+
+单条内部失败时该 id 下仅返回 `{"error": "失败原因"}`，其余条目正常。
+
+#### 错误响应
+
+| 状态码 | 说明 |
+|--------|------|
+| 422 | 请求体为空 / 超过 20 条 / id 超 64 字符 / 文本为空或超过 5000 字符 |
+
+#### 说明
+
+- 各条目逐条执行，耗时随条目数线性增长（每条约 2-4 秒），20 条约 40-80 秒，客户端超时建议 ≥300 秒；
+- 大模型检查存在输出波动，同一文本多次审查时，检出问题的位置一致但建议措辞可能略有差异，属正常现象。
+
+### 批量文本审查（旧接口，已废弃——请改用 /api/v1/sign/batch-submit）
+
+```txt
+POST /api/documents/text-guard/batch （deprecated）
 ```
 
 一次请求审查多条文本，按调用方自定义的 `id` 返回各自结果；单条失败不影响其他条。
