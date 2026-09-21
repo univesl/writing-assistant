@@ -22,7 +22,7 @@
 | 接口 | 方法 | 说明 |
 |------|------|------|
 | /api/documents/file-guard | POST | 文件内容审查（敏感 + 不规范表述 + 错别字） |
-| /api/documents/text-guard | POST | 文本内容审查（同上，支持单条与批量两种形态） |
+| /api/documents/text-guard | POST | 文本内容审查（同上，批量 key-value 形态） |
 | /api/documents/extractions | POST | 公文字段提取（11 项标准字段） |
 | /api/health | GET | 健康检查 |
 
@@ -120,21 +120,9 @@ POST /api/documents/file-guard
 POST /api/documents/text-guard
 ```
 
-接口直接接收文本并执行敏感内容、不规范表述和错别字检测。支持**单条**与**批量**两种请求形态，按请求体结构自动区分。
+接口接收批量文本并执行敏感内容、不规范表述和错别字检测。请求体为「调用方自定义 id → 待审文本」的映射，响应按相同 id 回带各自的审查结果。
 
-#### 形态一：单条（请求体仅含 text 一个键）
-
-```json
-{
-    "text": "我今天心晴很好，会议记要已存档。"
-}
-```
-
-| 字段 | 必填 | 类型 | 说明 |
-|------|------|------|------|
-| text | 是 | string | 待审查文本，不能为空 |
-
-#### 形态二：批量（键为调用方自定义 id）
+#### 请求
 
 ```json
 {
@@ -145,18 +133,19 @@ POST /api/documents/text-guard
 
 | 要求 | 说明 |
 |------|------|
-| 键（id） | 调用方自定义幂等键，响应原样带回作为 key；非空、长度 ≤64；注意不能使用字符串 "text"（会被识别为单条形态） |
+| 键（id） | 调用方自定义幂等键，响应原样带回作为 key；非空、长度 ≤64，同批内不能重复（JSON 对象键天然唯一） |
 | 值（文本） | 待审查文本，1-5000 字符 |
 | 数量 | 最多 20 条 |
 
-批量响应按相同 id 回带各自的审查字段（与单条响应字段一致），单条失败不影响其他条目，失败条目仅含 `{"error": "失败原因"}`。批量耗时随条目数线性增长（每条约 2-4 秒），20 条约 40-80 秒，客户端超时建议 ≥300 秒。
+响应按相同 id 回带各自的审查字段（见下方示例），单条失败不影响其他条目，失败条目仅含 `{"error": "失败原因"}`。耗时随条目数线性增长（每条约 2-4 秒），20 条约 40-80 秒，客户端超时建议 ≥300 秒。
 
-### 成功响应（HTTP 200）
+### 成功响应（HTTP 200，按 id 映射）
 
 ```json
 {
-    "harmful": "false",
-    "harmful_type": "normal",
+    "id1": {
+        "harmful": "false",
+        "harmful_type": "normal",
     "harmful_type_label": "正常",
     "harmful_reason": "文本为日常陈述，未发现风险内容。",
     "harmful_words": "",
@@ -188,8 +177,10 @@ POST /api/documents/text-guard
             "confidence": "high"
         }
     ],
-    "corrected": "我今天心情很好，会议纪要已存档。",
-    "typo_check_error": null
+        "corrected": "我今天心情很好，会议纪要已存档。",
+        "typo_check_error": null
+    },
+    "id2": { "...": "同上结构；失败时该条仅含 {\"error\": \"原因\"}" }
 }
 ```
 
@@ -229,8 +220,7 @@ POST /api/documents/text-guard
 
 | 状态码 | 说明 |
 |--------|------|
-| 400 | 文本为空（单条形态） |
-| 422 | 参数校验失败（非 JSON 对象 / 空 body / 批量超 20 条 / id 超长 / 文本为空或超 5000 字符） |
+| 422 | 参数校验失败（非 JSON 对象 / 空 body / 超过 20 条 / id 超长 / 文本为空或超过 5000 字符） |
 
 ---
 
@@ -265,7 +255,7 @@ POST /api/documents/text-guard
 
 ## 5. 位置定位说明
 
-issues 中的 `start/end` 基于**服务端解析后的正文**（text-guard 即传入的原文，file-guard 即返回的 `parsed_content`）。
+issues 中的 `start/end` 基于**服务端解析后的正文**（text-guard 即该条传入的原文，file-guard 即返回的 `parsed_content`）。
 
 **推荐做法**（file-guard）：以 `parsed_content` 为高亮/定位基准，并先做自校验：
 

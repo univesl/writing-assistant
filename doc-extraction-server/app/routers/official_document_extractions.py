@@ -64,14 +64,12 @@ def _review_flat(text: str) -> dict:
 
 @router.post("/text-guard")
 async def guard_document_text(request: Request):
-    """同时审查文本中的敏感内容和错别字/表述。
+    """文本内容审查（key-value 批量契约，2026-09-21 起为唯一形态）。
 
-    同一入口支持两种请求形态（按请求体结构自动区分）：
-    - 单条：{"text": "待审查文本"}（请求体仅含 text 一个键），返回平铺的审查结果，
-      与既有调用方完全兼容；
-    - 批量：{"自定义id1": "文本1", "自定义id2": "文本2"}，最多 20 条，文本 1..5000 字符；
-      响应按相同 id 回带各自的审查字段，单条失败不影响其他条目，失败条目仅含 {"error": "原因"}。
-      批量耗时随条目数线性增长（每条约 2-4 秒），调用方超时建议 >= 300 秒。
+    请求体为「调用方自定义 id → 待审文本」的映射，最多 20 条，id 长度 ≤64，
+    文本 1..5000 字符；响应按相同 id 回带各自的审查字段（平铺，字段同综合审查结果），
+    单条失败不影响其他条目，失败条目仅含 {"error": "原因"}。
+    批量耗时随条目数线性增长（每条约 2-4 秒），调用方超时建议 >= 300 秒。
     """
     try:
         payload = await request.json()
@@ -80,20 +78,6 @@ async def guard_document_text(request: Request):
 
     if not isinstance(payload, dict) or not payload:
         raise HTTPException(status_code=422, detail="请求体不能为空")
-
-    # 单条模式：请求体仅含 text 一个键（保持既有调用方的行为不变）
-    if set(payload.keys()) == {"text"}:
-        text = payload["text"]
-        if not isinstance(text, str) or not text.strip():
-            raise HTTPException(status_code=400, detail="审查内容不能为空")
-        try:
-            return review_text(text)
-        except DocumentParseError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except DocumentGuardError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-    # 批量模式：{自定义id: 待审文本}
     if len(payload) > 20:
         raise HTTPException(status_code=422, detail="最多支持 20 条")
     for key, value in payload.items():
