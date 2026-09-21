@@ -66,7 +66,7 @@ def _review_flat(text: str) -> dict:
 async def guard_document_text(request: Request):
     """文本内容审查（key-value 批量契约，2026-09-21 起为唯一形态）。
 
-    请求体为「调用方自定义 id → 待审文本」的映射，最多 20 条，id 长度 ≤64，
+    请求体为「调用方自定义 id → 待审文本」的映射，最多 30 条，id 长度 ≤64，
     文本 1..5000 字符；响应按相同 id 回带各自的审查字段（平铺，字段同综合审查结果），
     单条失败不影响其他条目，失败条目仅含 {"error": "原因"}。
     批量耗时随条目数线性增长（每条约 2-4 秒），调用方超时建议 >= 300 秒。
@@ -78,8 +78,8 @@ async def guard_document_text(request: Request):
 
     if not isinstance(payload, dict) or not payload:
         raise HTTPException(status_code=422, detail="请求体不能为空")
-    if len(payload) > 20:
-        raise HTTPException(status_code=422, detail="最多支持 20 条")
+    if len(payload) > 30:
+        raise HTTPException(status_code=422, detail="最多支持 30 条")
     for key, value in payload.items():
         if not isinstance(key, str) or not key:
             raise HTTPException(status_code=422, detail="id 必须为非空字符串")
