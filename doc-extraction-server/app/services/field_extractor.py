@@ -198,35 +198,15 @@ class FieldExtractor:
         if not fields:
             return {}
 
-        fields_desc = "\n".join([
-            f"- {f.name}: {f.description}" for f in fields
-        ])
-
         max_chars = 8000
         truncated = content[:max_chars] if len(content) > max_chars else content
 
-        system_prompt = f"""你是一位专业的文档分析助手。请从以下文档中提取指定字段的信息。
-
-需要提取的字段：
-{fields_desc}
-
-提取规则：
-1. 仔细阅读文档内容，准确提取每个字段对应的信息
-2. 如果某个字段在文档中未提及，返回空字符串""
-3. 保持原文的表述，不要添加额外解释
-
-【字段格式规范】
-- 文件标题：提取具体的、语义相关的标题，如"关于开展XX工作的通知"。不要提取通用模板性文字如"北京航空航天大学文件"、"XX单位文件"等。
-- 来文字号：必须与原文格式完全一致，包括所有标点符号（如〔〕、[]、【】等），不得篡改或转换。
-- 日期：提取标准的年月日格式（如"2024年3月15日"或"2024-03-15"），不能只写数字如"20240315"或"201458"。
-- 时间节点：详细提取文档中所有截止时间、完成时限、上报期限、会议时间、执行期限等。格式为"时间+事项要求"，例如"2024年3月15日前：完成材料报送"、"5月1日前：提交总结报告"。如有多个时间节点，用分号分隔。
-- 紧急程度：从文档中找到对应的关键词（如特急、急件、加急、平件等）。
-- 来文单位：提取完整的发文单位名称。
-
-请以JSON格式返回结果，格式如下：
-{{"字段名": "提取的值", ...}}
-
-只返回JSON，不要返回其他内容。"""
+        # 2026-09-21: 精简 prompt——冗长规则措辞会触发 GLM 超长思考（1.5万+字），
+        # 耗尽 max_tokens 导致正文为空；紧凑版实测可正常输出全部字段
+        field_names = "、".join(f.name for f in fields)
+        system_prompt = f"""从公文中提取字段，输出JSON对象（键为字段名，未提及的字段值为""），只输出JSON不输出其他内容。
+字段：{field_names}
+规则：文件标题取具体事由标题（如"关于XX的通知"），不取"XX大学文件"类版头；来文字号按原文样式保留标点（〔〕[]【】）；日期输出"2024年3月15日"格式；时间节点列出全部时限，格式"时间：事项"，多个用分号；紧急程度取关键词（特急/急件/加急/平件）。"""
 
         if supplemental_content:
             supplemental_prompt = f"\n\n【OCR 补充识别结果】\n第1页左上角：\n{supplemental_content[:3000]}\n"
@@ -239,7 +219,9 @@ class FieldExtractor:
         max_attempts = 3
         for attempt in range(1, max_attempts + 1):
             try:
-                response = requests.post(
+                # 2026-09-21: 上游网关对非流式请求有 60s 硬超时，GLM 长思考会被 504 掐断，
+                # 改用流式调用并聚合 content（流式下网关只限制读间隔，token 持续流出即可）
+                with requests.post(
                     f"{self.llm_config['base_url']}/chat/completions",
                     headers={
                         "Authorization": f"Bearer {self.llm_config.get('api_key', '')}",
@@ -252,30 +234,44 @@ class FieldExtractor:
                             {"role": "user", "content": user_content}
                         ],
                         "temperature": 0.1,
-                        "max_tokens": 4000
+                        "max_tokens": 4000,
+                        "stream": True
                     },
-                    timeout=FIELD_EXTRACTION_TIMEOUT
-                )
+                    timeout=FIELD_EXTRACTION_TIMEOUT,
+                    stream=True
+                ) as response:
+                    # SSE 流未带 charset 时 requests 会用 latin-1 解码，中文全部变乱码导致字段匹配失败
+                    response.encoding = "utf-8"
+                    if response.status_code != 200:
+                        if response.status_code in retryable_status and attempt < max_attempts:
+                            print(f"[字段提取] API 返回错误: {response.status_code}（第 {attempt}/{max_attempts} 次，稍后重试）")
+                            time.sleep(5 * attempt)
+                            continue
+                        print(f"[字段提取] API 返回错误: {response.status_code}")
+                        return {f.name: "" for f in fields}
 
-                if response.status_code == 200:
-                    result = response.json()
-                    message = result.get("choices", [{}])[0].get("message", {})
-                    text = message.get("content") or ""
-                    parsed = self._parse_llm_response(text, fields)
-                    if any(parsed.values()) or attempt >= max_attempts:
-                        return parsed
-                    # GLM 思考过程较长时可能耗尽 max_tokens 导致正文为空，重试
-                    print(f"[字段提取] 模型返回空结果（第 {attempt}/{max_attempts} 次，重试）")
-                    time.sleep(3)
-                    continue
+                    chunks = []
+                    for line in response.iter_lines(decode_unicode=True):
+                        if not line or not line.startswith("data:"):
+                            continue
+                        data = line[5:].strip()
+                        if data == "[DONE]":
+                            break
+                        try:
+                            delta = (json.loads(data).get("choices") or [{}])[0].get("delta") or {}
+                        except (ValueError, IndexError):
+                            continue
+                        if delta.get("content"):
+                            chunks.append(delta["content"])
+                    text = "".join(chunks)
 
-                if response.status_code in retryable_status and attempt < max_attempts:
-                    print(f"[字段提取] API 返回错误: {response.status_code}（第 {attempt}/{max_attempts} 次，稍后重试）")
-                    time.sleep(5 * attempt)
-                    continue
-
-                print(f"[字段提取] API 返回错误: {response.status_code}")
-                return {f.name: "" for f in fields}
+                parsed = self._parse_llm_response(text, fields)
+                if any(parsed.values()) or attempt >= max_attempts:
+                    return parsed
+                # GLM 思考过程较长时可能耗尽 max_tokens 导致正文为空，重试
+                print(f"[字段提取] 模型返回空结果（第 {attempt}/{max_attempts} 次，重试）")
+                time.sleep(3)
+                continue
 
             except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
                 if attempt < max_attempts:
