@@ -117,43 +117,15 @@ class DocumentFileGuardIn(BaseModel):
     content_base64: str = Field(..., min_length=1, description="文件内容的 Base64 编码")
 
 
-class DocumentFileGuardReview(BaseModel):
-    """内容审查结果"""
-    harmful: str
-    harmful_type: str = "none"
-    harmful_type_label: str = "无"
-    harmful_reason: str = ""
-    harmful_words: str = ""
-    harmful_degree: str = "none"
-    harmful_degree_label: str = "无"
-    confidence: str = "low"
-    confidence_label: str = "低"
-    highlight_spans: list = []
-    stage: Optional[str] = None
-    issues: list = []
-    corrected: str = ""
-    typo_check_error: Optional[str] = None
-
-
 class DocumentFileGuardOut(BaseModel):
-    """文件内容审查响应"""
+    """文件内容审查响应：review 为二合一内容检查接口的原始返回（原样透传，字段以上游为准）"""
     filename: str
     file_type: str
     content_length: int
-    review: DocumentFileGuardReview
+    review: dict
     # 审查所基于的解析文本：issues 的 start/end 偏移以此为锚定基准，
     # 调用方高亮定位时应以该文本（或在其自有文本中检索 original）为参照
     parsed_content: Optional[str] = None
-
-
-class DocumentTextGuardIn(BaseModel):
-    """文本内容审查请求"""
-    text: str = Field(..., min_length=1, description="待审查的文本内容")
-
-
-class DocumentTextGuardOut(DocumentFileGuardReview):
-    """文本内容审查响应"""
-    pass
 
 
 class ExtractionModelListOut(BaseModel):

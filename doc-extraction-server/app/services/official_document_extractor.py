@@ -1,11 +1,9 @@
 import base64
 import os
 import tempfile
-import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any
 
 import requests
 
@@ -19,14 +17,10 @@ from .region_ocr import extract_first_page_top_left
 
 
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "./upload"))
-GUARD_API_URL = os.getenv("GUARD_API_URL", "https://07b503.xhang.buaa.edu.cn:52811/guard")
-GUARD_API_TIMEOUT = float(os.getenv("GUARD_API_TIMEOUT", "180"))
-NONSTANDARD_API_URL = os.getenv("NONSTANDARD_API_URL", "https://07b503.xhang.buaa.edu.cn:52811/api/v1/nonstandard-expression/check")
-TYPO_API_URL = os.getenv("TYPO_API_URL", "https://07b503.xhang.buaa.edu.cn:52811/api/v1/typo-punctuation/check")
-# 2026-09-19 起质量检查改用二合一接口（响应含 nonstandard/typo 两个子结构，引擎 DeepSeek-V4-Flash）
-QUALITY_CHECK_URL = os.getenv("QUALITY_CHECK_URL", "https://07b503.xhang.buaa.edu.cn:52811/quality-check")
-QUALITY_API_TIMEOUT = float(os.getenv("QUALITY_API_TIMEOUT", "180"))
-QUALITY_API_KEY = os.getenv("QUALITY_API_KEY", "")
+# 2026-09-28 起内容检查只用二合一 /all-check 接口（敏感+不规范+错别字），
+# 其响应原样透传给调用方，不做字段拼装；旧 /guard 与 /quality-check 已弃用
+ALL_CHECK_URL = os.getenv("ALL_CHECK_URL", "https://07b503.xhang.buaa.edu.cn:52811/all-check")
+ALL_CHECK_TIMEOUT = float(os.getenv("ALL_CHECK_TIMEOUT", "180"))
 
 
 class UnsupportedFileTypeError(Exception):
@@ -117,7 +111,7 @@ def guard_file_from_base64(filename: str, content_base64: str) -> dict:
             "filename": filename,
             "file_type": get_file_type(filename),
             "content_length": len(parsed_content),
-            "review": review_text(parsed_content),
+            "review": call_all_check(parsed_content),
             "parsed_content": parsed_content,
         }
     finally:
@@ -125,138 +119,37 @@ def guard_file_from_base64(filename: str, content_base64: str) -> dict:
             temp_path.unlink(missing_ok=True)
 
 
-def _call_sensitive_guard(text: str) -> dict[str, Any]:
-    try:
-        response = requests.post(GUARD_API_URL, json={"text": text}, timeout=GUARD_API_TIMEOUT)
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.Timeout as exc:
-        raise DocumentGuardError("内容审查服务超时，请稍后重试") from exc
-    except requests.exceptions.ConnectionError as exc:
-        raise DocumentGuardError("内容审查服务暂时不可用") from exc
-    except (requests.exceptions.RequestException, ValueError) as exc:
-        raise DocumentGuardError("内容审查服务返回异常") from exc
+def call_all_check(text: str) -> dict:
+    """调用二合一内容检查接口，响应 JSON 原样返回（纯透传）。
 
-
-_QUALITY_CHECK_SEMAPHORE = threading.Semaphore(1)
-
-
-def _call_quality_check(text: str) -> tuple[list, str, str | None]:
-    """调用二合一质量检查接口（nonstandard + typo），解析合并响应。"""
-    # 上游容量实测为 2 路并发，超出的请求会收到 available=false，故本地限流排队
-    with _QUALITY_CHECK_SEMAPHORE:
-        # 上游偶发 available=false（后端繁忙），重试一次
-        last_errors: str | None = None
-        for attempt in range(3):
-            try:
-                response = requests.post(QUALITY_CHECK_URL, json={"text": text}, timeout=QUALITY_API_TIMEOUT)
-                response.raise_for_status()
-                result = response.json()
-
-                issues: list = []
-                corrected_candidates: list[str] = []
-                errors: list[str] = []
-                any_available = False
-                # 旧的两个类别在新响应中以 nonstandard / typo 两个子对象返回，结构同旧端点
-                for category in ("nonstandard", "typo"):
-                    section = result.get(category)
-                    if not isinstance(section, dict):
-                        continue
-                    if not section.get("available", True):
-                        warning = section.get("upstream_warning") or "服务不可用"
-                        errors.append(f"{category}: {warning}")
-                        continue
-                    any_available = True
-                    for item in section.get("issues", []) or []:
-                        if not isinstance(item, dict):
-                            continue
-                        issues.append({
-                            "start": item.get("start"),
-                            "end": item.get("end"),
-                            "original": item.get("original", ""),
-                            "suggestion": item.get("suggestion", ""),
-                            "error_type": item.get("category") or category,
-                            "message": item.get("reason") or item.get("message", ""),
-                            "source": category,
-                            **({"confidence": item["confidence"]} if "confidence" in item else {}),
-                        })
-                    corrected = section.get("corrected_text") or section.get("corrected")
-                    if corrected:
-                        corrected_candidates.append(corrected)
-
-                last_errors = "; ".join(errors) if errors else None
-                if not any_available and attempt < 2:
-                    time.sleep(2 * (attempt + 1))
-                    continue
-                corrected_candidates.append(result.get("corrected_text") or "")
-                return issues, next((c for c in corrected_candidates if c), text), last_errors
-            except requests.exceptions.Timeout:
-                last_errors = "质量检查服务超时"
-                if attempt < 2:
-                    time.sleep(2 * (attempt + 1))
-                    continue
-                return [], text, last_errors
-            except requests.exceptions.RequestException:
-                last_errors = "质量检查服务不可用"
-                if attempt < 2:
-                    time.sleep(2 * (attempt + 1))
-                    continue
-                return [], text, last_errors
-            except ValueError:
-                return [], text, "质量检查服务返回异常"
-        return [], text, last_errors
-
-def _merge_quality_corrections(text: str, issues: list, corrected_candidates: list[str]) -> str:
-    """按原文位置合并两类质量接口的修正，重叠位置保留首个结果。"""
-    merged = text
-    valid = []
-    for item in issues:
+    上游偶发 503/超时（模型繁忙），带 3 次退避重试；仍失败抛 DocumentGuardError。
+    """
+    last_error: str | None = None
+    for attempt in range(1, 4):
         try:
-            start, end = int(item["start"]), int(item["end"])
-        except (KeyError, TypeError, ValueError):
-            continue
-        suggestion = item.get("suggestion")
-        if start < 0 or end <= start or end > len(text) or not suggestion:
-            continue
-        valid.append((start, end, str(suggestion)))
-    occupied = []
-    for start, end, suggestion in sorted(valid, key=lambda value: value[0], reverse=True):
-        if any(start < other_end and end > other_start for other_start, other_end in occupied):
-            continue
-        merged = merged[:start] + suggestion + merged[end:]
-        occupied.append((start, end))
-    if valid:
-        return merged
-    for candidate in corrected_candidates:
-        if candidate and candidate != text:
-            return candidate
-    return text
+            response = requests.post(ALL_CHECK_URL, json={"text": text}, timeout=ALL_CHECK_TIMEOUT)
+            if response.status_code == 200:
+                return response.json()
+            last_error = f"内容检查服务返回 {response.status_code}"
+            if response.status_code in {429, 500, 502, 503, 504} and attempt < 3:
+                time.sleep(3 * attempt)
+                continue
+            raise DocumentGuardError(last_error)
+        except requests.exceptions.Timeout:
+            last_error = "内容检查服务超时"
+            if attempt < 3:
+                time.sleep(3 * attempt)
+                continue
+        except requests.exceptions.RequestException as exc:
+            last_error = "内容检查服务暂时不可用"
+            if attempt < 3:
+                time.sleep(3 * attempt)
+                continue
+    raise DocumentGuardError(last_error or "内容检查服务暂时不可用")
 
 
 def review_text(text: str) -> dict:
-    """同时执行敏感内容审查和错别字/表述检查（质量检查走二合一接口）。"""
+    """文本内容检查：解析后原文传给二合一接口，响应原样返回。"""
     if not text or not text.strip():
         raise DocumentParseError("审查内容不能为空")
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        sensitive_future = executor.submit(_call_sensitive_guard, text)
-        quality_future = executor.submit(_call_quality_check, text)
-        sensitive = sensitive_future.result()
-        issues, corrected, quality_error = quality_future.result()
-    # 2026-09-28: 严格透传语义——上游不返回的字段一律为 null，不再用默认值填充，
-    # 避免"上游已删字段、我们却返回貌似真实的默认值"的假数据
-    return {
-        "harmful": sensitive.get("harmful"),
-        "harmful_type": sensitive.get("harmful_type"),
-        "harmful_type_label": sensitive.get("harmful_type_label"),
-        "harmful_reason": sensitive.get("harmful_reason"),
-        "harmful_words": sensitive.get("harmful_words"),
-        "harmful_degree": sensitive.get("harmful_degree"),
-        "harmful_degree_label": sensitive.get("harmful_degree_label"),
-        "confidence": sensitive.get("confidence"),
-        "confidence_label": sensitive.get("confidence_label"),
-        "highlight_spans": sensitive.get("highlight_spans"),
-        "stage": sensitive.get("stage"),
-        "issues": issues,
-        "corrected": corrected,
-        "typo_check_error": quality_error,
-    }
+    return call_all_check(text)

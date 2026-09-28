@@ -36,16 +36,7 @@
 POST /api/documents/file-guard
 ```
 
-接口接收文件，解析正文并执行敏感内容、不规范表述和错别字检测。
-
-### 请求示例
-
-```json
-{
-    "filename": "公文.docx",
-    "content_base64": "文件内容的 Base64 编码"
-}
-```
+接口接收文件，解析正文后交给内容检查服务，检查结果**原样返回**。
 
 ### 请求字段
 
@@ -61,46 +52,18 @@ POST /api/documents/file-guard
     "filename": "公文.docx",
     "file_type": "docx",
     "content_length": 173,
-    "parsed_content": "关于开展科研项目管理培训的通知……会议记要已存档。",
-    "review": {
-        "harmful": "false",
-        "harmful_type": "normal",
-        "harmful_type_label": "正常",
-        "harmful_reason": "该文本为正式通知，属于正常的校内行政公文，不涉及任何违规内容。",
-        "harmful_words": "",
-        "harmful_degree": "none",
-        "harmful_degree_label": "无",
-        "confidence": "high",
-        "confidence_label": "高",
-        "highlight_spans": [],
-        "stage": null,
-        "issues": [
-            {
-                "start": 22,
-                "end": 24,
-                "original": "记要",
-                "suggestion": "纪要",
-                "error_type": "typo",
-                "message": "“记要”应为“纪要”，固定词语误用。",
-                "source": "typo",
-                "confidence": "high"
-            }
-        ],
-        "corrected": "关于开展科研项目管理培训的通知……会议纪要已存档。",
-        "typo_check_error": null
-    }
+    "parsed_content": "解析后的正文……",
+    "review": { "……": "内容检查服务的完整原始返回，见第 4 节" }
 }
 ```
-
-### 响应字段
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | filename | string | 原始文件名 |
 | file_type | string | 文件类型：pdf、docx、markdown 或 text |
 | content_length | integer | 解析后正文长度 |
-| parsed_content | string | 解析后的正文，issues 位置的锚定基准（用法见第 5 节） |
-| review | object | 综合审查结果，字段见第 4 节 |
+| parsed_content | string | 解析后的正文，issues 位置的锚定基准（见第 5 节） |
+| review | object | 内容检查结果，字段结构与内容检查服务返回完全一致（见第 4 节） |
 
 ### 错误响应
 
@@ -108,7 +71,7 @@ POST /api/documents/file-guard
 |--------|------|
 | 400 | 不支持的文件类型 / 无效 Base64 |
 | 422 | 参数校验失败 / 文档解析失败 |
-| 502 | 审查服务暂时不可用，请稍后重试 |
+| 502 | 内容检查服务暂时不可用（已自动重试 3 次） |
 
 ---
 
@@ -120,101 +83,33 @@ POST /api/documents/file-guard
 POST /api/documents/text-guard
 ```
 
-接口接收批量文本并执行敏感内容、不规范表述和错别字检测。请求体为「调用方自定义 id → 待审文本」的映射，响应按相同 id 回带各自的审查结果。
+接口接收批量文本（「调用方自定义 id → 待审文本」的映射），逐条交给内容检查服务，每个 id 下返回该条的**原始检查结果**。
 
-#### 请求
+### 请求
 
 ```json
 {
     "id1": "请程书记签发",
-    "id2": "请程记书签发"
+    "id2": "请程记书签发，记要存档"
 }
 ```
 
 | 要求 | 说明 |
 |------|------|
-| 键（id） | 调用方自定义幂等键，响应原样带回作为 key；非空、长度 ≤64，同批内不能重复（JSON 对象键天然唯一） |
+| 键（id） | 调用方自定义幂等键，响应原样带回作为 key；非空、长度 ≤64 |
 | 值（文本） | 待审查文本，1-5000 字符 |
 | 数量 | 最多 30 条 |
 
-响应按相同 id 回带各自的审查字段（见下方示例），单条失败不影响其他条目，失败条目仅含 `{"error": "失败原因"}`。耗时随条目数线性增长（每条约 2-4 秒），30 条约 60-120 秒，客户端超时建议 ≥300 秒。
-
-### 成功响应（HTTP 200，按 id 映射）
+### 成功响应（HTTP 200）
 
 ```json
 {
-    "id1": {
-        "harmful": "false",
-        "harmful_type": "normal",
-    "harmful_type_label": "正常",
-    "harmful_reason": "文本为日常陈述，未发现风险内容。",
-    "harmful_words": "",
-    "harmful_degree": "none",
-    "harmful_degree_label": "无",
-    "confidence": "high",
-    "confidence_label": "高",
-    "highlight_spans": [],
-    "stage": null,
-    "issues": [
-        {
-            "start": 4,
-            "end": 6,
-            "original": "心晴",
-            "suggestion": "心情",
-            "error_type": "typo",
-            "message": "“心晴”为“心情”的形近/音近误用。",
-            "source": "typo",
-            "confidence": "high"
-        },
-        {
-            "start": 10,
-            "end": 12,
-            "original": "记要",
-            "suggestion": "纪要",
-            "error_type": "typo",
-            "message": "“记要”应为“纪要”，固定词语误用。",
-            "source": "typo",
-            "confidence": "high"
-        }
-    ],
-        "corrected": "我今天心情很好，会议纪要已存档。",
-        "typo_check_error": null
-    },
-    "id2": { "...": "同上结构；失败时该条仅含 {\"error\": \"原因\"}" }
+    "id1": { "……": "该条文本的完整原始检查结果，见第 4 节" },
+    "id2": { "……": "同上" }
 }
 ```
 
-#### 批量响应示例（HTTP 200）
-
-```json
-{
-    "id1": {
-        "harmful": "false",
-        "issues": [],
-        "corrected": "请程书记签发",
-        "typo_check_error": null
-    },
-    "id2": {
-        "harmful": "false",
-        "issues": [
-            {
-                "start": 1,
-                "end": 4,
-                "original": "程记书",
-                "suggestion": "程书记",
-                "error_type": "typo",
-                "message": "“程记书”应为“程书记”。",
-                "source": "typo",
-                "confidence": "high"
-            }
-        ],
-        "corrected": "请程书记签发",
-        "typo_check_error": null
-    }
-}
-```
-
-（展示时省略部分字段，完整字段同第 4 节。）
+单条检查失败不影响其他条目，失败条目仅含 `{"error": "失败原因"}`。耗时随条目数线性增长（每条约 3-8 秒），客户端超时建议 ≥300 秒。
 
 ### 错误响应
 
@@ -224,32 +119,31 @@ POST /api/documents/text-guard
 
 ---
 
-## 4. 综合审查结果字段
+## 4. 内容检查结果字段
+
+审查类接口返回的检查结果（file-guard 的 `review`、text-guard 每个 id 下的对象）与内容检查服务的返回**完全一致**，主要结构如下：
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| harmful | string | "true" 表示发现敏感或风险内容，"false" 表示未发现 |
-| harmful_type | string | 风险类型编码 |
-| harmful_type_label | string | 风险类型名称 |
-| harmful_reason | string | 风险判断说明 |
-| harmful_words | string | 命中的敏感词或风险词 |
-| harmful_degree | string | 风险程度编码 |
-| harmful_degree_label | string | 风险程度名称 |
-| confidence | string | 敏感内容检测置信度编码 |
-| confidence_label | string | 敏感内容检测置信度名称 |
-| highlight_spans | array | 命中的文本片段 |
-| stage | string/null | 敏感内容检测阶段 |
-| issues | array | 问题列表（已去重，同一位置只保留一条） |
-| issues[].start | integer | 问题文本起始位置（字符偏移，含起点不含终点） |
-| issues[].end | integer | 问题文本结束位置 |
-| issues[].original | string | 原始错误文本 |
+| completed | boolean | 本次检查是否完整完成 |
+| has_issue | boolean | 是否发现任何问题 |
+| issue_count | integer | 问题总数 |
+| issues | array | 问题列表（已合并去重） |
+| issues[].category / type | string | 问题分类（如"语法格式"） |
+| issues[].original | string | 原始错误文本；恒等于 `解析正文[start:end]` |
 | issues[].suggestion | string | 建议修改文本 |
-| issues[].error_type | string | 问题类型：typo（错别字）或 nonstandard（不规范表述） |
-| issues[].message | string | 问题说明 |
-| issues[].source | string | 检测来源：typo 或 nonstandard |
-| issues[].confidence | string | 该条问题的置信度：high / medium / low |
-| corrected | string | 修正后的完整文本；无问题时与原文一致 |
-| typo_check_error | string/null | 质量检查异常说明，正常时为 null；非 null 表示检查未完成，此时 issues 可能为空，应提示"检查暂时不可用"而非"没有问题" |
+| issues[].reason | string | 问题说明 |
+| issues[].start / end | integer | 问题文本位置（字符偏移，含起点不含终点） |
+| issues[].confidence | string | 置信度：high / medium / low |
+| issues[].risk_level(_label) | string | 该条风险等级及名称 |
+| issues[].source | string | 检测来源：typo / nonstandard / safety |
+| risk_level(_label) | string | 整体风险等级及名称 |
+| safety | object | 内容安全（敏感）检测结果子对象：harmful、harmful_type(_label)、harmful_reason、harmful_words、harmful_degree(_label)、highlight_spans、stage 等 |
+| nonstandard | object | 不规范表述检测结果子对象 |
+| typo | object | 错别字/标点检测结果子对象 |
+| summary | object | 统计信息（各类问题数、去重数） |
+
+注：字段以上游内容检查服务实际返回为准，本服务原样透传、不增删改；新增字段会自动出现在响应中。
 
 ---
 
@@ -413,6 +307,6 @@ curl -sk -X POST https://85af8f.xhang.buaa.edu.cn:52811/api/documents/extraction
 
 1. **文件不留存**：上传文件解析完成后立即删除，如需留档请自行保存原件；
 2. **超时设置**：文本/文件审查建议 ≥180 秒；字段提取建议 ≥120 秒（大文件解析较慢时可放宽到 300 秒）；
-3. **检查状态**：`typo_check_error` 非 null 表示质量检查未完成，此时应以"检查暂时不可用"提示用户，不要当作"没有问题"；
+3. **检查状态**：检查结果中的 `completed` 为 false 或条目仅含 `{"error": ...}` 时表示该次检查未完成，应以"检查暂时不可用"提示用户，不要当作"没有问题"；
 4. **字符保真**：解析正文忠实还原源文件内容（含中文引号、下划线、特殊符号），可直接用于高亮与比对；
 5. **并发**：请避免瞬时大量并发请求，重负载场景建议做排队或限速。
