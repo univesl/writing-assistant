@@ -242,17 +242,19 @@ def review_text(text: str) -> dict:
         quality_future = executor.submit(_call_quality_check, text)
         sensitive = sensitive_future.result()
         issues, corrected, quality_error = quality_future.result()
+    # 2026-09-28: 严格透传语义——上游不返回的字段一律为 null，不再用默认值填充，
+    # 避免"上游已删字段、我们却返回貌似真实的默认值"的假数据
     return {
-        "harmful": sensitive.get("harmful", "false"),
-        "harmful_type": sensitive.get("harmful_type", "none"),
-        "harmful_type_label": sensitive.get("harmful_type_label", "无"),
-        "harmful_reason": sensitive.get("harmful_reason", ""),
-        "harmful_words": sensitive.get("harmful_words", ""),
-        "harmful_degree": sensitive.get("harmful_degree", "none"),
-        "harmful_degree_label": sensitive.get("harmful_degree_label", "无"),
-        "confidence": sensitive.get("confidence", "low"),
-        "confidence_label": sensitive.get("confidence_label", "低"),
-        "highlight_spans": sensitive.get("highlight_spans", []),
+        "harmful": sensitive.get("harmful"),
+        "harmful_type": sensitive.get("harmful_type"),
+        "harmful_type_label": sensitive.get("harmful_type_label"),
+        "harmful_reason": sensitive.get("harmful_reason"),
+        "harmful_words": sensitive.get("harmful_words"),
+        "harmful_degree": sensitive.get("harmful_degree"),
+        "harmful_degree_label": sensitive.get("harmful_degree_label"),
+        "confidence": sensitive.get("confidence"),
+        "confidence_label": sensitive.get("confidence_label"),
+        "highlight_spans": sensitive.get("highlight_spans"),
         "stage": sensitive.get("stage"),
         "issues": issues,
         "corrected": corrected,
