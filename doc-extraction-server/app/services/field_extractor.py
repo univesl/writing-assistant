@@ -16,22 +16,18 @@ import requests
 
 # 预定义模型配置（2026-09-16 移除 h3i 平台默认值，部署环境必须显式配置 FIELD_EXTRACTION_API_URL）
 def _field_base_url() -> str:
-    api_url = os.getenv("FIELD_EXTRACTION_API_URL") or os.getenv("LLM_API_URL")
+    # 2026-10-10: 只认 FIELD_EXTRACTION_* 配置（此前的 LLM_*/MODEL_* fallback 为 wa-backend 拷贝残留）
+    api_url = os.getenv("FIELD_EXTRACTION_API_URL")
     if api_url:
         return api_url.rstrip("/")
-    base = os.getenv("FIELD_EXTRACTION_API_BASE") or os.getenv("MODEL_API_BASE", "")
-    base = base.rstrip("/")
+    base = os.getenv("FIELD_EXTRACTION_API_BASE", "").rstrip("/")
     return base if base.endswith("/v1") else f"{base}/v1"
 
 
 FIELD_EXTRACTION_MODEL_ID = os.getenv("FIELD_EXTRACTION_MODEL_ID", "qwen2.5-72b")
-FIELD_EXTRACTION_MODEL_NAME = (
-    os.getenv("FIELD_EXTRACTION_MODEL_NAME")
-    or os.getenv("LLM_MODEL_NAME")
-    or os.getenv("DEFAULT_MODEL", "Qwen2.5-72B-Instruct")
-)
-FIELD_EXTRACTION_API_KEY = os.getenv("FIELD_EXTRACTION_API_KEY") or os.getenv("LLM_API_KEY") or os.getenv("MODEL_API_KEY", "")
-FIELD_EXTRACTION_TIMEOUT = float(os.getenv("FIELD_EXTRACTION_TIMEOUT", os.getenv("LLM_REQUEST_TIMEOUT", "180")))
+FIELD_EXTRACTION_MODEL_NAME = os.getenv("FIELD_EXTRACTION_MODEL_NAME", "")
+FIELD_EXTRACTION_API_KEY = os.getenv("FIELD_EXTRACTION_API_KEY", "")
+FIELD_EXTRACTION_TIMEOUT = float(os.getenv("FIELD_EXTRACTION_TIMEOUT", "180"))
 
 
 AVAILABLE_MODELS = {

@@ -16,7 +16,6 @@ from .document_processor import (
 from .region_ocr import extract_first_page_top_left
 
 
-UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "./upload"))
 # 2026-09-28 起内容检查只用二合一 /all-check 接口（敏感+不规范+错别字），
 # 其响应原样透传给调用方，不做字段拼装；旧 /guard 与 /quality-check 已弃用
 ALL_CHECK_URL = os.getenv("ALL_CHECK_URL", "https://07b503.xhang.buaa.edu.cn:52811/all-check")

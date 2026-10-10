@@ -16,7 +16,8 @@
 
 | 依赖 | 必需性 | 安装 | 用途 |
 |------|--------|------|------|
-| Python ≥ 3.11 | 必需 | — | 运行时 |
+| Python 3.11–3.12 | 必需 | — | 运行时（OCR 引擎 rapidocr 不支持 3.13+） |
+| python3-venv | 建虚拟环境需要 | `apt install python3-venv` | Ubuntu 系统默认不带 |
 | **pandoc** | 必需（DOCX 解析） | `apt install pandoc` | DOCX → 纯文本 |
 | libgomp1 | OCR 需要（一般自带） | `apt install libgomp1` | onnxruntime 运行库 |
 
