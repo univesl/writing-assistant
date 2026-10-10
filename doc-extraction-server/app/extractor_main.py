@@ -18,7 +18,7 @@ from .routers import official_document_extractions as official_document_extracti
 app = FastAPI(
     title="Document Extraction Service",
     version="2.0.0",
-    description="公文字段提取服务，通过 RESTful API 接收 Base64 编码文件并返回 JSON 提取结果。",
+    description="公文解析服务：文件/文本内容检查（透传上游二合一接口）+ 公文字段提取（LLM）。",
 )
 
 app.add_middleware(
