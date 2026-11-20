@@ -1,5 +1,6 @@
 from datetime import datetime
 from pathlib import Path
+import time
 
 from dotenv import load_dotenv
 
@@ -38,6 +39,20 @@ def health():
         "service": "official-document-extractor",
         "timestamp": datetime.now().isoformat(),
     }
+
+
+@app.middleware("http")
+async def log_request_timing(request: Request, call_next):
+    """请求耗时日志：时间 方法 路径 -> 状态码 耗毫秒。仅观测，不影响业务逻辑。"""
+    start = time.perf_counter()
+    response = await call_next(request)
+    elapsed_ms = (time.perf_counter() - start) * 1000
+    print(
+        f"[访问] {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} "
+        f"{request.method} {request.url.path} -> {response.status_code} {elapsed_ms:.0f}ms",
+        flush=True,
+    )
+    return response
 
 
 @app.exception_handler(RequestValidationError)
