@@ -1,0 +1,29 @@
+# ============================================================
+# doc-extraction 公文解析服务
+#
+# 部署惯例与 /opt/app 相同：目录内 docker-compose.yml + .env 注入配置，
+# restart: unless-stopped，自带 healthcheck。
+# 日志走 docker logs（应用内置 [访问] 时间/耗时中间件，无需文件挂载）。
+# ============================================================
+
+services:
+  doc-extraction:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: doc-extraction:latest
+    container_name: doc-extraction
+    env_file: .env
+    ports:
+      # 仅绑定回环：外部经反向代理/隧道访问，不直接暴露
+      - "127.0.0.1:8050:8050"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://127.0.0.1:8050/api/health', timeout=5)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    # 时区与宿主机一致（应用日志时间戳按东八区）
+    environment:
+      TZ: Asia/Shanghai

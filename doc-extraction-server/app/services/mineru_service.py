@@ -12,37 +12,43 @@ load_dotenv()
 
 DEFAULT_MINERU_API_URL = "https://37cb31.xhang.buaa.edu.cn:52811"
 MINERU_API_URL = os.getenv("MINERU_API_URL", DEFAULT_MINERU_API_URL).strip().rstrip("/")
-MINERU_VLM_URL = os.getenv("MINERU_VLM_URL", MINERU_API_URL).strip().rstrip("/")
 MINERU_REQUEST_TIMEOUT = float(os.getenv("MINERU_REQUEST_TIMEOUT", "180"))
 MINERU_PARSE_TIMEOUT = float(os.getenv("MINERU_PARSE_TIMEOUT", "600"))
 MINERU_POLL_INTERVAL = float(os.getenv("MINERU_POLL_INTERVAL", "2"))
+# 2026-11-20 迁移适配：native = 自建原生 mineru-api（同步 /file_parse），router = 旧的共享 Router
+MINERU_MODE = os.getenv("MINERU_MODE", "router").strip().lower()
+MINERU_NATIVE_LANG = os.getenv("MINERU_NATIVE_LANG", "ch")
 
 
 class MinerUService:
-    """通过已部署的 MinerU Router 服务将 PDF 解析为 Markdown。"""
+    """PDF 解析为 Markdown。支持两种后端（MINERU_MODE）：
+
+    - router: 旧的共享 MinerU Router（提交 /tasks + 轮询）；
+    - native: 自建原生 mineru-api（同步 POST /file_parse，CPU/GPU 均可）。
+    """
 
     def __init__(
         self,
         api_url: str = MINERU_API_URL,
-        vlm_url: str = MINERU_VLM_URL,
         request_timeout: float = MINERU_REQUEST_TIMEOUT,
         parse_timeout: float = MINERU_PARSE_TIMEOUT,
         poll_interval: float = MINERU_POLL_INTERVAL,
+        mode: str = MINERU_MODE,
     ):
-        # 当前部署的 API/VLM 地址相同；优先使用专门的 VLM 地址，保留两个
-        # 环境变量是为了兼容后续把路由层和 VLM 层拆分部署的场景。
         self.api_url = api_url.rstrip("/")
-        self.vlm_url = (vlm_url or api_url).rstrip("/")
-        self.base_url = self.vlm_url
         self.request_timeout = request_timeout
         self.parse_timeout = parse_timeout
         self.poll_interval = poll_interval
+        self.mode = mode if mode in ("router", "native") else "router"
 
     def parse_pdf_to_markdown(self, pdf_path: str) -> Optional[str]:
         """提交 PDF 解析任务并返回 Markdown；失败时返回 ``None``。"""
         file_path = Path(pdf_path)
 
         try:
+            if self.mode == "native":
+                return self._parse_native(file_path)
+
             task_id = self._submit_task(file_path)
             if not task_id:
                 return None
@@ -61,8 +67,47 @@ class MinerUService:
             print(f"[MinerU] 解析异常: {type(exc).__name__}: {exc}")
             return None
 
+    def _parse_native(self, file_path: Path) -> Optional[str]:
+        """自建原生 mineru-api：同步 POST /file_parse，一次拿 Markdown。"""
+        url = f"{self.api_url}/file_parse"
+        with file_path.open("rb") as file_obj:
+            response = requests.post(
+                url,
+                files={"files": (file_path.name, file_obj, "application/pdf")},
+                data={"output_format": "md", "language": MINERU_NATIVE_LANG, "backend": "pipeline"},
+                timeout=self.parse_timeout,
+            )
+        response.raise_for_status()
+        result = response.json()
+        markdown_content = self._extract_native_markdown(result)
+        if not markdown_content:
+            print(f"[MinerU][native] 结果中没有 Markdown: {file_path.name}, 顶层键={list(result.keys()) if isinstance(result, dict) else type(result).__name__}")
+            return None
+        print(f"[MinerU][native] 解析成功: {file_path.name}")
+        return markdown_content
+
+    @staticmethod
+    def _extract_native_markdown(result) -> Optional[str]:
+        """从原生 /file_parse 响应中取 markdown 文本，兼容常见返回形态。"""
+        if isinstance(result, str):
+            return result or None
+        if not isinstance(result, dict):
+            return None
+        for key in ("md_content", "markdown", "md", "text"):
+            value = result.get(key)
+            if isinstance(value, str) and value.strip():
+                return value
+        results = result.get("results")
+        if isinstance(results, dict) and results:
+            first = next(iter(results.values()))
+            if isinstance(first, dict):
+                md = first.get("md_content") or first.get("markdown")
+                if isinstance(md, str) and md.strip():
+                    return md
+        return None
+
     def _submit_task(self, file_path: Path) -> Optional[str]:
-        url = f"{self.base_url}/tasks"
+        url = f"{self.api_url}/tasks"
 
         with file_path.open("rb") as file_obj:
             response = requests.post(
@@ -89,7 +134,7 @@ class MinerUService:
         return task_id
 
     def _wait_for_completion(self, task_id: str) -> bool:
-        url = f"{self.base_url}/tasks/{task_id}"
+        url = f"{self.api_url}/tasks/{task_id}"
         deadline = time.monotonic() + self.parse_timeout
         last_status = None
 
@@ -117,7 +162,7 @@ class MinerUService:
         return False
 
     def _get_markdown_result(self, task_id: str, file_stem: str) -> Optional[str]:
-        url = f"{self.base_url}/tasks/{task_id}/result"
+        url = f"{self.api_url}/tasks/{task_id}/result"
         response = requests.get(url, timeout=self.request_timeout)
         response.raise_for_status()
         result = response.json()

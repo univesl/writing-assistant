@@ -106,7 +106,24 @@ doc-extraction-server/
 
 ---
 
-## 3. 配置与启动
+## 3. Docker 部署（推荐，跟随宿主机 /opt 惯例）
+
+宿主机要求：Docker ≥ 20 + Compose v2（镜像源已配 docker.1ms.run 更佳）。
+
+```bash
+mkdir -p /opt/doc-extraction && cd /opt/doc-extraction
+# 放入本目录代码（Dockerfile、docker-compose.yml、app/、requirements.txt）
+cp .env.example .env   # 填写配置（同下节）
+docker compose up -d --build
+docker logs -f doc-extraction    # 看到 Uvicorn running 即成功
+curl http://127.0.0.1:8050/api/health
+```
+
+要点：`.env` 由 compose 注入（镜像不含密钥）；容器仅绑定回环 8050，外部经反代/隧道暴露；日志用 `docker logs`（应用内置每请求的时间/耗时记录）；`restart: unless-stopped` 开机自启。
+
+## 4. 直接部署（venv，不用 Docker 时）
+
+
 
 ```bash
 cp .env.example .env    # 填写 FIELD_EXTRACTION_API_KEY 等必填项
@@ -119,13 +136,13 @@ curl http://127.0.0.1:8050/api/health   # 验证
 
 OCR 可调参数：`OCR_TOP_LEFT_REGION`（归一化区域，默认 `0,0,0.42,0.18`）、`OCR_RENDER_SCALE`（渲染倍率，默认 3）。
 
-## 4. 测试
+## 5. 测试
 
 ```bash
 pip install httpx
 python -m unittest discover tests -v    # 契约测试为 mock 上游，无需外部服务
 ```
 
-## 5. 数据说明
+## 6. 数据说明
 
 **无本地数据留存**：上传文件写入系统临时目录、请求结束即删除；无数据库。仓库中不含任何解析数据文件。

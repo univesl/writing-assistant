@@ -15,7 +15,6 @@ class MinerUServiceTests(unittest.TestCase):
         self.pdf_path.write_bytes(b"%PDF-1.4\n%%EOF\n")
         self.service = MinerUService(
             api_url="https://mineru.example.test",
-            vlm_url="https://mineru.example.test",
             request_timeout=5,
             parse_timeout=10,
             poll_interval=0,
