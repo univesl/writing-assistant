@@ -5,8 +5,5 @@ python-multipart>=0.0.9
 requests>=2.31.0
 python-dotenv>=1.0.0
 
-# PDF 解析与首页抬头 OCR（可选，缺失时 OCR 自动降级，不影响主流程）
+# PDF 渲染（首页收文章区域截图，供 qwen VLM 识别）
 PyMuPDF>=1.24.0
-rapidocr_onnxruntime>=1.3.24
-numpy>=1.24.0
-Pillow>=10.0.0
