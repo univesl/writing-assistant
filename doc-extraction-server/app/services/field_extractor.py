@@ -231,6 +231,10 @@ class FieldExtractor:
                         ],
                         "temperature": 0.1,
                         "max_tokens": 4000,
+                        # 2026-11-22: 字段提取是结构化任务，关闭深度思考——
+                        # 思考与正文共享 max_tokens 预算，思考偶发超长会耗尽预算导致正文为空
+                        # （"空结果"问题根源）；关闭后实测 4s 出结果（原 26-90s），质量不降
+                        "chat_template_kwargs": {"enable_thinking": False},
                         "stream": True
                     },
                     timeout=FIELD_EXTRACTION_TIMEOUT,
