@@ -130,6 +130,7 @@ class FieldExtractor:
         Returns:
             {字段名: 提取值}
         """
+        self.last_error = None  # 最近一次失败原因（成功为 None），供上层区分故障类型
         # 全部使用 LLM 提取
         llm_results = self._extract_by_llm(content, self.fields, supplemental_content)
 
@@ -248,6 +249,7 @@ class FieldExtractor:
                             time.sleep(5 * attempt)
                             continue
                         print(f"[字段提取] API 返回错误: {response.status_code}")
+                        self.last_error = f"上游拒绝: HTTP {response.status_code}"
                         return {f.name: "" for f in fields}
 
                     chunks = []
@@ -267,6 +269,8 @@ class FieldExtractor:
 
                 parsed = self._parse_llm_response(text, fields)
                 if any(parsed.values()) or attempt >= max_attempts:
+                    if not any(parsed.values()):
+                        self.last_error = "模型未返回内容（重试耗尽）"
                     return parsed
                 # GLM 思考过程较长时可能耗尽 max_tokens 导致正文为空，重试
                 print(f"[字段提取] 模型返回空结果（第 {attempt}/{max_attempts} 次，重试）")
@@ -279,9 +283,11 @@ class FieldExtractor:
                     time.sleep(5 * attempt)
                     continue
                 print(f"[字段提取] LLM提取失败: {e}")
+                self.last_error = f"上游未响应: {type(e).__name__}"
                 return {f.name: "" for f in fields}
             except Exception as e:
                 print(f"[字段提取] LLM提取失败: {e}")
+                self.last_error = f"提取异常: {type(e).__name__}: {str(e)[:120]}"
                 return {f.name: "" for f in fields}
 
     def _parse_llm_response(self, text: str, fields: List[FieldDef]) -> Dict[str, str]:

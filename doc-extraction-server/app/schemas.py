@@ -103,11 +103,12 @@ class DocumentExtractionIn(BaseModel):
 
 
 class DocumentExtractionOut(BaseModel):
-    """公文字段提取响应"""
+    """公文字段提取响应（extraction_error: 提取失败原因，成功为 None）"""
     filename: str
     file_type: str
     content_length: int
     fields: dict
+    extraction_error: Optional[str] = None
     parsed_content: Optional[str] = None
 
 

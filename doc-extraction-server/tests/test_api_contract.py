@@ -32,7 +32,7 @@ class DocumentExtractionApiContractTests(unittest.TestCase):
         # parsed_content 字段始终存在，未请求时为 null
         self.assertEqual(
             set(response.json()),
-            {"filename", "file_type", "content_length", "fields", "parsed_content"},
+            {"filename", "file_type", "content_length", "fields", "parsed_content", "extraction_error"},
         )
         self.assertIsNone(response.json()["parsed_content"])
         mock_extract.assert_called_once_with(

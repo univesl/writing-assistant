@@ -234,6 +234,17 @@ POST /api/documents/extractions
 
 未识别到的字段返回空字符串。`include_parsed_content=true` 时额外返回 `parsed_content`。
 
+新增 `extraction_error` 字段用于区分提取失败原因（成功时为 `null`）：
+
+| extraction_error 值 | 含义 |
+|--------------------|------|
+| null | 提取成功 |
+| 上游未响应: ... | LLM 服务超时/连接失败（网络层） |
+| 上游拒绝: HTTP xxx | LLM 服务返回错误状态码 |
+| 模型未返回内容（重试耗尽） | 模型连续 3 次未产出有效结果 |
+
+`extraction_error` 非 null 时 `fields` 可能为全空，调用方应提示"提取失败"而非"没有可提取字段"。
+
 ### 错误响应
 
 | 状态码 | 说明 |

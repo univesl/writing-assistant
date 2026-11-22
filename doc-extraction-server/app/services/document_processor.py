@@ -183,17 +183,18 @@ def parse_document(file_path: Path) -> Optional[str]:
         return None
 
 
-def extract_fields_from_content(content: str, model_name: str = "qwen2.5-72b", supplemental_content: str = "") -> Dict[str, str]:
+def extract_fields_from_content(content: str, model_name: str = "qwen2.5-72b", supplemental_content: str = "") -> tuple[Dict[str, str], str | None]:
     """
-    从文档内容提取字段
+    从文档内容提取字段；返回 (fields, error)，error 非 None 表示提取失败及原因
+    （上游未响应 / 上游拒绝 / 模型未返回内容），成功时为 None
     """
     try:
         extractor = FieldExtractor.from_model(model_name)
         results = extractor.extract(content, supplemental_content=supplemental_content)
-        return results
+        return results, getattr(extractor, "last_error", None)
     except Exception as e:
         print(f"[ERROR] 字段提取失败: {e}")
-        return {}
+        return {}, f"提取异常: {type(e).__name__}: {str(e)[:120]}"
 
 
 def delete_session_files(session_id: int) -> bool:

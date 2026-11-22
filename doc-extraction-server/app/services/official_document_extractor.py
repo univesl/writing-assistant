@@ -65,13 +65,17 @@ def extract_from_base64(
         if not parsed_content:
             raise DocumentParseError("文档解析失败")
 
-        extracted_fields = extract_fields_from_content(parsed_content, model_name, ocr_result.get("text", ""))
+        extracted_fields, extraction_error = extract_fields_from_content(
+            parsed_content, model_name, ocr_result.get("text", "")
+        )
 
         result = {
             "filename": filename,
             "file_type": get_file_type(filename),
             "content_length": len(parsed_content),
             "fields": extracted_fields,
+            # 提取失败原因（成功为 None）：区分上游未响应/上游拒绝/模型未返回内容
+            "extraction_error": extraction_error,
         }
 
         if include_parsed_content:
