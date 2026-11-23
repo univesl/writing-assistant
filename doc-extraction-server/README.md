@@ -16,10 +16,9 @@
 
 | 依赖 | 必需性 | 安装 | 用途 |
 |------|--------|------|------|
-| Python 3.11–3.12 | 必需 | — | 运行时（OCR 引擎 rapidocr 不支持 3.13+） |
+| Python 3.11–3.12 | 必需 | — | 运行时 |
 | python3-venv | 建虚拟环境需要 | `apt install python3-venv` | Ubuntu 系统默认不带 |
 | **pandoc** | 必需（DOCX 解析） | `apt install pandoc` | DOCX → 纯文本 |
-| libgomp1 | OCR 需要（一般自带） | `apt install libgomp1` | onnxruntime 运行库 |
 
 ### Python 依赖（`pip install -r requirements.txt`）
 
@@ -29,11 +28,9 @@
 | python-multipart | 文件类请求体解析 |
 | requests | 调用上游服务 |
 | python-dotenv | 加载 .env 配置 |
-| PyMuPDF（fitz） | PDF 页面渲染（供 OCR） |
-| rapidocr_onnxruntime | OCR 引擎，**模型权重随 pip 包自带，无需单独下载模型文件** |
-| numpy / Pillow | OCR 图像预处理 |
+| PyMuPDF（fitz） | PDF 页面渲染（首页收文章区域截图，供 VLM 识别） |
 
-> OCR 整体为**可选依赖**：未安装时代码自动降级跳过，不影响主流程。
+> 首页收文章识别走远程 VLM（GLM5.3-Flash 视觉），无需本地 OCR 模型，详见下文 OCR 章节。
 > 跑单元测试另需 `pip install httpx`（fastapi TestClient 依赖）。
 
 ### 外部服务依赖（部署服务器需网络可达，地址配在 `.env`）
@@ -135,6 +132,18 @@ curl http://127.0.0.1:8050/api/health   # 验证
 默认 `0.0.0.0:8050`；`PYTHON_BIN`/`PORT`/`HOST`/`LOG_FILE` 可在 `.env` 覆盖（默认 `python3` / `8050` / `./doc-extract.log`）。
 
 OCR 可调参数：`OCR_TOP_LEFT_REGION`（归一化区域，默认 `0,0,0.42,0.18`）、`OCR_RENDER_SCALE`（渲染倍率，默认 3）。
+
+## OCR（首页收文章识别，VLM）
+
+PDF 解析时对**首页左上角**做区域识别（收文登记章的 From/To、收文编号、收文日期等），作为字段提取的补充信息。
+
+- 引擎：**GLM5.3-Flash 视觉能力**（beflops 平台，与字段提取同体系；`chat_template_kwargs.enable_thinking=false` 关思考）；
+- 依赖：只需 PyMuPDF 渲染截图；**无需本地 OCR 模型**；
+- 配置：`.env` 中 `VLM_API_URL` / `VLM_API_KEY` / `VLM_MODEL` 必填；
+- 失败自动降级：VLM 不可用时返回空补充（带 1 次重试），不影响主流程；
+- 可调参数：`OCR_TOP_LEFT_REGION`（归一化区域，默认 `0,0,0.42,0.18`）、`OCR_RENDER_SCALE`（渲染倍率，默认 3）
+
+---
 
 ## 5. 测试
 
