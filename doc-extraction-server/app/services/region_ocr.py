@@ -64,8 +64,9 @@ def extract_first_page_top_left(pdf_path: Path) -> dict:
                     {"type": "text", "text": _PROMPT},
                 ],
             }],
-            "max_tokens": 1500,
-            # GLM5.3-Flash 关思考姿势（chat_template_kwargs；残留思考不占 max_tokens 预算）
+            # GLM5.3-Flash 的 enable_thinking=false 压不住思考（实测 2.5k~14k 字），思考与正文
+            # 共享 max_tokens；预算小会 finish=length 导致正文为空。给足余量保证一定有结果。
+            "max_tokens": 16000,
             "chat_template_kwargs": {"enable_thinking": False},
         }
         headers = {"Authorization": f"Bearer {VLM_API_KEY}"}
