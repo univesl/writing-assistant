@@ -1,8 +1,8 @@
 """第一页左上角收文章识别（qwen VLM 版）。
 
-2026-11-22: 由本地 RapidOCR 切换为 qwen 视觉模型——收文登记章的红章小字
-（收文编号/日期）RapidOCR 识别残缺（如"〔2026〕1078号"识别成"切18号"），
-qwen 可完整识别；彩色截图直传，无需灰度预处理。
+2026-11-22: 由本地 RapidOCR 切换为 VLM 视觉识别（收文登记章的红章小字
+（收文编号/日期）RapidOCR 识别残缺）；2026-11-23: VLM 由 qwen 切换为
+GLM5.3-Flash（与字段提取同平台）；彩色截图直传。
 """
 
 import base64
@@ -16,15 +16,17 @@ import requests
 OCR_REGION = tuple(float(x) for x in os.getenv("OCR_TOP_LEFT_REGION", "0,0,0.42,0.18").split(","))
 OCR_RENDER_SCALE = float(os.getenv("OCR_RENDER_SCALE", "3"))
 
-QWEN_VLM_API_URL = os.getenv("QWEN_VLM_API_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1").rstrip("/")
-QWEN_VLM_API_KEY = os.getenv("QWEN_VLM_API_KEY", "")
-QWEN_VLM_MODEL = os.getenv("QWEN_VLM_MODEL", "qwen3.8-max")
-QWEN_VLM_TIMEOUT = float(os.getenv("QWEN_VLM_TIMEOUT", "60"))
+# 2026-11-23: 视觉识别由 qwen 切换为 GLM5.3-Flash（与字段提取同平台的 VLM 能力）
+VLM_API_URL = os.getenv("VLM_API_URL", "").rstrip("/")
+VLM_API_KEY = os.getenv("VLM_API_KEY", "")
+VLM_MODEL = os.getenv("VLM_MODEL", "")
+VLM_TIMEOUT = float(os.getenv("VLM_TIMEOUT", "60"))
 
 _PROMPT = (
-    "这是公文首页左上角的收文登记章区域截图。请逐字识别图中所有文字"
+    "这是公文首页左上角的收文登记章区域截图。请识别图中所有文字"
     "（如收文机关From、收文单位To、收文编号/字号、收文日期等），"
-    "按原样逐行输出，不要推测不存在的内容。"
+    "每行一条纯文本输出，不要markdown格式、不要加说明或注释，"
+    "不确定的按最可能的字形输出，不要推测不存在的内容。"
 )
 
 
@@ -47,14 +49,14 @@ def _render_top_left_png(pdf_path: Path) -> bytes:
 
 def extract_first_page_top_left(pdf_path: Path) -> dict:
     """用 qwen VLM 识别首页左上角；失败时返回空结果（不影响主流程）。"""
-    if not QWEN_VLM_API_KEY:
-        return {"text": "", "confidence": 0.0, "error": "QWEN_VLM_API_KEY 未配置"}
+    if not (VLM_API_URL and VLM_API_KEY and VLM_MODEL):
+        return {"text": "", "confidence": 0.0, "error": "VLM 未配置(VLM_API_URL/KEY/MODEL)"}
 
     try:
         png = _render_top_left_png(pdf_path)
         b64 = base64.b64encode(png).decode()
         payload = {
-            "model": QWEN_VLM_MODEL,
+            "model": VLM_MODEL,
             "messages": [{
                 "role": "user",
                 "content": [
@@ -62,18 +64,18 @@ def extract_first_page_top_left(pdf_path: Path) -> dict:
                     {"type": "text", "text": _PROMPT},
                 ],
             }],
-            "max_tokens": 800,
-            # 关思考：默认思考 35s+，关闭后 2s 内返回且识别质量不降
-            "enable_thinking": False,
+            "max_tokens": 1500,
+            # GLM5.3-Flash 关思考姿势（chat_template_kwargs；残留思考不占 max_tokens 预算）
+            "chat_template_kwargs": {"enable_thinking": False},
         }
-        headers = {"Authorization": f"Bearer {QWEN_VLM_API_KEY}"}
+        headers = {"Authorization": f"Bearer {VLM_API_KEY}"}
 
         last_err = None
         for attempt in range(2):  # 网关偶发 400/超时，重试一次
             try:
                 resp = requests.post(
-                    f"{QWEN_VLM_API_URL}/chat/completions",
-                    headers=headers, json=payload, timeout=QWEN_VLM_TIMEOUT,
+                    f"{VLM_API_URL}/chat/completions",
+                    headers=headers, json=payload, timeout=VLM_TIMEOUT,
                 )
                 if resp.status_code == 200:
                     text = (resp.json().get("choices") or [{}])[0].get("message", {}).get("content") or ""
