@@ -156,7 +156,7 @@ POST /api/documents/text-guard
 
 ## 5. 位置定位说明
 
-issues 中的 `start/end` 基于**服务端解析后的正文**（text-guard 即该条传入的原文，file-guard 即返回的 `parsed_content`）。
+问题列表位于每条检查结果的 `typo.issues` 与 `nonstandard.issues` 中，其 `start/end` 基于**服务端解析后的正文**（text-guard 即该条传入的原文，file-guard 即返回的 `parsed_content`）。
 
 **推荐做法**（file-guard）：以 `parsed_content` 为高亮/定位基准，并先做自校验：
 
@@ -276,13 +276,15 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 BASE = "https://85af8f.xhang.buaa.edu.cn:52811"
 
-# 文本审查
+# 文本审查（批量 key-value；问题列表在每条结果的 typo / nonstandard 子对象里）
 resp = requests.post(f"{BASE}/api/documents/text-guard",
-                     json={"text": "会议记要已存档。"},
+                     json={"id1": "会议记要已存档。"},
                      verify=False, timeout=180)
-for issue in resp.json()["issues"]:
-    print(issue["original"], "→", issue["suggestion"],
-          f"({issue['source']}/{issue.get('confidence')})")
+for id_, result in resp.json().items():
+    for section in ("typo", "nonstandard"):
+        for issue in (result.get(section) or {}).get("issues", []):
+            print(id_, issue["original"], "→", issue["suggestion"],
+                  f"({section}/{issue.get('confidence')})")
 
 # 文件审查（含位置自校验）
 with open("公文.docx", "rb") as f:
@@ -292,8 +294,10 @@ resp = requests.post(f"{BASE}/api/documents/file-guard",
                      verify=False, timeout=300)
 data = resp.json()
 parsed = data.get("parsed_content") or ""
-for issue in data["review"]["issues"]:
-    assert parsed[issue["start"]:issue["end"]] == issue["original"]
+review = data.get("review") or {}
+for section in ("typo", "nonstandard"):
+    for issue in (review.get(section) or {}).get("issues", []):
+        assert parsed[issue["start"]:issue["end"]] == issue["original"]
 
 # 字段提取
 resp = requests.post(f"{BASE}/api/documents/extractions",
@@ -305,10 +309,10 @@ fields = resp.json()["fields"]
 ### curl
 
 ```bash
-# 文本审查
+# 文本审查（批量）
 curl -sk -X POST https://85af8f.xhang.buaa.edu.cn:52811/api/documents/text-guard \
   -H "Content-Type: application/json" \
-  -d '{"text": "会议记要已存档。"}'
+  -d '{"id1": "会议记要已存档。"}'
 
 # 文件审查
 curl -sk -X POST https://85af8f.xhang.buaa.edu.cn:52811/api/documents/file-guard \
