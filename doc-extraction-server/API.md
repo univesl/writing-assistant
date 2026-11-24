@@ -125,25 +125,32 @@ POST /api/documents/text-guard
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| completed | boolean | 本次检查是否完整完成 |
 | has_issue | boolean | 是否发现任何问题 |
+| nonstandard | object | 不规范表述检测结果子对象 |
+| typo | object | 错别字/标点检测结果子对象 |
+| summary | object | 统计信息：各类问题数、去重数（duplicates_removed）、冲突消解数（conflicts_resolved） |
+
+子对象（nonstandard / typo）的公共字段：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| available | boolean | 该项检测是否完整执行 |
 | issue_count | integer | 问题总数 |
-| issues | array | 问题列表（已合并去重） |
+| issues | array | 问题列表（已去重） |
 | issues[].category / type | string | 问题分类（如"语法格式"） |
-| issues[].original | string | 原始错误文本；恒等于 `解析正文[start:end]` |
+| issues[].original | string | 原始错误文本；恒等于 `解析正文[start:end]`，可用于定位自校验 |
 | issues[].suggestion | string | 建议修改文本 |
 | issues[].reason | string | 问题说明 |
 | issues[].start / end | integer | 问题文本位置（字符偏移，含起点不含终点） |
 | issues[].confidence | string | 置信度：high / medium / low |
 | issues[].risk_level(_label) | string | 该条风险等级及名称 |
-| issues[].source | string | 检测来源：typo / nonstandard / safety |
-| risk_level(_label) | string | 整体风险等级及名称 |
-| safety | object | 内容安全（敏感）检测结果子对象：harmful、harmful_type(_label)、harmful_reason、harmful_words、harmful_degree(_label)、highlight_spans、stage 等 |
-| nonstandard | object | 不规范表述检测结果子对象 |
-| typo | object | 错别字/标点检测结果子对象 |
-| summary | object | 统计信息（各类问题数、去重数） |
+| corrected_text | string | 该项检测的修正后全文 |
+| model / analysis_mode | string | 引擎与检测模式（model_hybrid=模型+规则；rules_only=仅规则兜底） |
+| upstream_warning | string/null | 降级提示；非 null 表示本次未做完整模型检测 |
 
 注：字段以上游内容检查服务实际返回为准，本服务原样透传、不增删改；新增字段会自动出现在响应中。
+
+**降级说明**：上游模型繁忙时返回 `analysis_mode: "rules_only"`（仅规则级检查，模型语义识别跳过，`upstream_warning` 带提示文案）。此时检查未完整完成，调用方应以"检查暂时不可用"提示用户而非"没有问题"；服务端已自动重试一次，仍降级则原样返回。
 
 ---
 
@@ -320,6 +327,6 @@ curl -sk -X POST https://85af8f.xhang.buaa.edu.cn:52811/api/documents/extraction
 
 1. **文件不留存**：上传文件解析完成后立即删除，如需留档请自行保存原件；
 2. **超时设置**：文本/文件审查建议 ≥180 秒；字段提取建议 ≥120 秒（大文件解析较慢时可放宽到 300 秒）；
-3. **检查状态**：检查结果中的 `completed` 为 false 或条目仅含 `{"error": ...}` 时表示该次检查未完成，应以"检查暂时不可用"提示用户，不要当作"没有问题"；
+3. **检查状态**：条目仅含 `{"error": ...}` 表示该次检查未完成；子对象 `analysis_mode: "rules_only"` 表示仅完成规则级检查（模型检测跳过），均应以"检查暂时不可用"提示用户，不要当作"没有问题"；
 4. **字符保真**：解析正文忠实还原源文件内容（含中文引号、下划线、特殊符号），可直接用于高亮与比对；
 5. **并发**：请避免瞬时大量并发请求，重负载场景建议做排队或限速。
