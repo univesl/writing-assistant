@@ -143,7 +143,7 @@ POST /api/documents/text-guard
 | issues[].reason | string | 问题说明 |
 | issues[].start / end | integer | 问题文本位置（字符偏移，含起点不含终点） |
 | issues[].confidence | string | 置信度：high / medium / low |
-| issues[].risk_level(_label) | string | 该条风险等级及名称 |
+| issues[].risk_level | string | 该条风险等级：如 low |
 | issues[].risk_type | string | 风险大类：如 political_expression（政治表述）、general_text（一般文本） |
 | issues[].checker | string | 检测器标识（如 document_rules=公文专用规则检测） |
 | corrected_text | string | 该项检测的修正后全文。注意：**typo 与 nonstandard 的 corrected_text 各自独立**，分别只包含对应类别的修正，没有合并版全文 |
