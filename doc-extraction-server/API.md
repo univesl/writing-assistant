@@ -144,11 +144,25 @@ POST /api/documents/text-guard
 | issues[].start / end | integer | 问题文本位置（字符偏移，含起点不含终点） |
 | issues[].confidence | string | 置信度：high / medium / low |
 | issues[].risk_level(_label) | string | 该条风险等级及名称 |
-| corrected_text | string | 该项检测的修正后全文 |
+| issues[].risk_type | string | 风险大类：如 political_expression（政治表述）、general_text（一般文本） |
+| issues[].checker | string | 检测器标识（如 document_rules=公文专用规则检测） |
+| corrected_text | string | 该项检测的修正后全文。注意：**typo 与 nonstandard 的 corrected_text 各自独立**，分别只包含对应类别的修正，没有合并版全文 |
 | model / analysis_mode | string | 引擎与检测模式（model_hybrid=模型+规则；rules_only=仅规则兜底） |
 | upstream_warning | string/null | 降级提示；非 null 表示本次未做完整模型检测 |
+| request_id | string | 该次检测的请求标识（排查用，每次调用不同） |
+| latency_ms | integer | 该项检测耗时（毫秒） |
+| document_checks_applied | boolean | 是否应用了公文专用规则检测（如机构名称规范核对） |
 
 注：字段以上游内容检查服务实际返回为准，本服务原样透传、不增删改；新增字段会自动出现在响应中。
+
+#### 调用方处理要点
+
+| 情形 | 处理建议 |
+|------|----------|
+| `original` 与 `suggestion` **相同**（如序号跳跃"三、→三、"） | 这是**位置标记型问题**（如编号连续性检查），表示该位置有结构性问题需人工处理——不是可直接替换的修正，界面应展示 `reason` 并引导用户检查该处，不要按"原文≠建议"过滤掉 |
+| `suggestion` 为**空字符串** | 表示"需要修改但改法需人工确认"（如简称的规范写法有多种），应展示 `reason` 由用户决定，不要当作漏检过滤掉 |
+| 同一位置多条 issues | 上游已跨类别去重，但仍可能保留不同类别的建议（同一处既有错别字又有名称规范问题），界面可按 `start/end` 位置合并展示 |
+| 需要一份合并的修正全文 | 上游不提供合并版，请按各条 issues 的 `start/end` 在解析正文上自行应用修正（**按位置倒序应用**，避免前面的替换使后面偏移失效） |
 
 **降级说明**：上游模型繁忙时返回 `analysis_mode: "rules_only"`（仅规则级检查，模型语义识别跳过，`upstream_warning` 带提示文案）。此时检查未完整完成，调用方应以"检查暂时不可用"提示用户而非"没有问题"；服务端已自动重试一次，仍降级则原样返回。
 
