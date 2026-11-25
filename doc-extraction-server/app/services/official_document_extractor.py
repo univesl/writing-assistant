@@ -1,5 +1,6 @@
 import base64
 import os
+import re
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -32,6 +33,37 @@ class DocumentParseError(Exception):
 
 class DocumentGuardError(Exception):
     """内容审查服务调用失败"""
+
+
+# 上传文件名的收文编号前缀解析：
+#   "行政上级〔2026〕1361号  关于开展……的通知.pdf" → (行政上级, 〔2026〕1361号, 关于开展……的通知)
+#   "01-2026-420-.pdf"（纯序号式）→ (None, 〔2026〕420号, None)
+_FILENAME_NUM_RE = re.compile(
+    r'^(?P<cat>[\u4e00-\u9fa5A-Za-z]{2,20}?)'
+    r'[〔\[【]\s*(?P<y>\d{4})\s*[]】〕]\s*'
+    r'(?P<n>\d{1,6})\s*号?\s*'
+    r'[-_ \t]*\s*(?P<title>.+)$'
+)
+_FILENAME_SEQ_RE = re.compile(
+    r'^(?P<seq>\d{1,6})[-_](?P<y>(?:19|20)\d{2})[-_](?P<n>\d{1,6})[-_]?\s*[-_ ]*\s*(?P<title>.*)$'
+)
+
+
+def parse_document_filename(filename: str) -> tuple:
+    """从上传文件名解析 (文件类别, 收文编号, 文件标题)；无法识别时对应项为 None。"""
+    stem = Path(filename).stem.strip()
+    m = _FILENAME_NUM_RE.match(stem)
+    if m:
+        cat = m.group('cat') or None
+        num = f"〔{m.group('y')}〕{m.group('n')}号"
+        title = (m.group('title') or '').strip() or None
+        return cat, num, title
+    m = _FILENAME_SEQ_RE.match(stem)
+    if m:
+        num = f"〔{m.group('y')}〕{m.group('n')}号"
+        title = (m.group('title') or '').strip() or None
+        return None, num, title
+    return None, None, None
 
 
 def extract_from_base64(
@@ -68,6 +100,24 @@ def extract_from_base64(
         extracted_fields, extraction_error = extract_fields_from_content(
             parsed_content, model_name, ocr_result.get("text", "")
         )
+
+        # 2026-11-25: 上传文件名形如 "行政上级〔2026〕1361号 标题.pdf" 时，
+        # 文件类别/收文编号/文件标题 以文件名为准（覆盖 LLM 结果），与 OA 收文单字段对应
+        doc_cat, doc_num, doc_title = parse_document_filename(filename)
+        if doc_cat:
+            extracted_fields["文件类别"] = doc_cat
+        if doc_num:
+            extracted_fields["收文编号"] = doc_num
+        if doc_title:
+            extracted_fields["文件标题"] = doc_title
+        # 输出字段按 OA 收文单字段顺序排列
+        _order = ["文件标题", "文件类别", "收文编号", "来文单位", "来文字号", "原文日期",
+                  "紧急程度", "阅文/办文", "时间节点", "收文日期", "关联文件", "备注",
+                  "是否需明确建议牵头单位"]
+        extracted_fields = {
+            **{k: extracted_fields[k] for k in _order if k in extracted_fields},
+            **{k: v for k, v in extracted_fields.items() if k not in _order},
+        }
 
         result = {
             "filename": filename,
