@@ -103,13 +103,12 @@ def extract_from_base64(
 
         # 2026-11-25: 上传文件名形如 "行政上级〔2026〕1361号 标题.pdf" 时，
         # 文件类别/收文编号/文件标题 以文件名为准（覆盖 LLM 结果），与 OA 收文单字段对应
-        doc_cat, doc_num, doc_title = parse_document_filename(filename)
+        doc_cat, doc_num, _doc_title = parse_document_filename(filename)
         if doc_cat:
             extracted_fields["文件类别"] = doc_cat
         if doc_num:
             extracted_fields["收文编号"] = doc_num
-        if doc_title:
-            extracted_fields["文件标题"] = doc_title
+        # 2026-11-25: 按反馈撤销——文件标题不再用文件名覆盖，保持 LLM 从正文提取
         # 输出字段按 OA 收文单字段顺序排列
         _order = ["文件标题", "文件类别", "收文编号", "来文单位", "来文字号", "原文日期",
                   "紧急程度", "阅文/办文", "时间节点", "收文日期", "关联文件", "备注",
