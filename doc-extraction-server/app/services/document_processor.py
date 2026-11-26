@@ -8,6 +8,8 @@ import json
 import html
 import os
 import re
+import threading
+import time
 import shutil
 from pathlib import Path
 from typing import Dict, Optional
@@ -183,11 +185,26 @@ def parse_document(file_path: Path) -> Optional[str]:
         return None
 
 
+# 2026-11-26: GLM5.2 上游实测并发 ≥6 即集体超时（6路 4/6 成功，8路 6/8），
+# 4 路以内稳定（4/4，58~105s）。闸门限流：同时最多 4 个提取在跑，多的排队等待，
+# 避免一起冲上游后全部超时。排队等待时间计入字段提取的 240s 总时长预算。
+_LLM_EXTRACT_SEMAPHORE = threading.BoundedSemaphore(int(os.getenv("FIELD_EXTRACTION_MAX_CONCURRENCY", "4")))
+_LLM_EXTRACT_QUEUE_WAIT_S = float(os.getenv("FIELD_EXTRACTION_QUEUE_WAIT_S", "300"))
+
+
 def extract_fields_from_content(content: str, model_name: str = "qwen2.5-72b", supplemental_content: str = "") -> tuple[Dict[str, str], str | None]:
     """
     从文档内容提取字段；返回 (fields, error)，error 非 None 表示提取失败及原因
-    （上游未响应 / 上游拒绝 / 模型未返回内容），成功时为 None
+    （上游未响应 / 上游拒绝 / 模型未返回内容 / 排队超时），成功时为 None
     """
+    t_wait = time.monotonic()
+    if not _LLM_EXTRACT_SEMAPHORE.acquire(timeout=_LLM_EXTRACT_QUEUE_WAIT_S):
+        waited = time.monotonic() - t_wait
+        print(f"[字段提取] 排队 {waited:.0f}s 仍未获得执行名额，放弃", flush=True)
+        return {}, f"服务繁忙：排队等待超过 {waited:.0f}s，请稍后重试"
+    waited = time.monotonic() - t_wait
+    if waited > 1:
+        print(f"[字段提取] 并发限流排队 {waited:.0f}s 后开始执行", flush=True)
     try:
         extractor = FieldExtractor.from_model(model_name)
         results = extractor.extract(content, supplemental_content=supplemental_content)
@@ -195,6 +212,8 @@ def extract_fields_from_content(content: str, model_name: str = "qwen2.5-72b", s
     except Exception as e:
         print(f"[ERROR] 字段提取失败: {e}")
         return {}, f"提取异常: {type(e).__name__}: {str(e)[:120]}"
+    finally:
+        _LLM_EXTRACT_SEMAPHORE.release()
 
 
 def delete_session_files(session_id: int) -> bool:
