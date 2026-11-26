@@ -185,11 +185,11 @@ def parse_document(file_path: Path) -> Optional[str]:
         return None
 
 
-# 2026-11-26: GLM5.2 上游实测并发 ≥6 即集体超时（6路 4/6 成功，8路 6/8），
-# 4 路以内稳定（4/4，58~105s）。闸门限流：同时最多 4 个提取在跑，多的排队等待，
-# 避免一起冲上游后全部超时。排队等待时间计入字段提取的 240s 总时长预算。
+# 2026-11-26: 并发闸门——同时最多 4 个提取在跑，多的排队等待。
+# 排队与提取各自有上限且不叠加：排队最多 60s，提取最多 150s，单请求最坏约 210s 后必定返回。
+# （此前排队 300s + 提取 240s 叠加，最坏 540s+，前端等 9 分钟才被告知失败，无意义）
 _LLM_EXTRACT_SEMAPHORE = threading.BoundedSemaphore(int(os.getenv("FIELD_EXTRACTION_MAX_CONCURRENCY", "4")))
-_LLM_EXTRACT_QUEUE_WAIT_S = float(os.getenv("FIELD_EXTRACTION_QUEUE_WAIT_S", "300"))
+_LLM_EXTRACT_QUEUE_WAIT_S = float(os.getenv("FIELD_EXTRACTION_QUEUE_WAIT_S", "60"))
 
 
 def extract_fields_from_content(content: str, model_name: str = "qwen2.5-72b", supplemental_content: str = "") -> tuple[Dict[str, str], str | None]:

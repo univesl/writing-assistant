@@ -30,7 +30,7 @@ FIELD_EXTRACTION_API_KEY = os.getenv("FIELD_EXTRACTION_API_KEY", "")
 FIELD_EXTRACTION_TIMEOUT = float(os.getenv("FIELD_EXTRACTION_TIMEOUT", "150"))
 # 整个提取过程（含所有重试）的总时长预算；到点即停止重试并带原因返回，
 # 避免并发时单个请求无限期占住线程（此前最坏 180s×3+退避 ≈ 550s，实测出现 743s）
-FIELD_EXTRACTION_TOTAL_BUDGET = float(os.getenv("FIELD_EXTRACTION_TOTAL_BUDGET", "240"))
+FIELD_EXTRACTION_TOTAL_BUDGET = float(os.getenv("FIELD_EXTRACTION_TOTAL_BUDGET", "150"))
 
 
 AVAILABLE_MODELS = {
@@ -222,7 +222,7 @@ class FieldExtractor:
 
         # 2026-09-16: 对上游瞬时故障(限流/网关超时/网络抖动)自动重试，避免静默返回空字段
         retryable_status = {429, 500, 502, 503, 504}
-        max_attempts = 3
+        max_attempts = 2  # 上游故障时第 3 次同样失败，只会让调用方多等一轮
         deadline = time.monotonic() + FIELD_EXTRACTION_TOTAL_BUDGET
         for attempt in range(1, max_attempts + 1):
             # 剩余预算不足一次调用则不再重试，直接带原因返回（保证有结果）
