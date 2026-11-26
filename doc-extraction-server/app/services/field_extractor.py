@@ -197,8 +197,8 @@ class FieldExtractor:
         if not fields:
             return {}
 
-        max_chars = 8000
-        truncated = content[:max_chars] if len(content) > max_chars else content
+        # 2026-11-26: 移除原 8000 字截断——自部署模型无需节省 token，静默截断会让
+        # 长文件后半部分的日期、文末落款等字段丢失，且调用方无从察觉。全文送入模型。
 
         # 2026-09-21: 精简 prompt——冗长规则措辞会触发 GLM 超长思考（1.5万+字），
         # 耗尽 max_tokens 导致正文为空；紧凑版实测可正常输出全部字段
@@ -215,7 +215,7 @@ class FieldExtractor:
             supplemental_prompt = f"\n\n【收文登记章识别结果】（首页左上角，含本校收文编号、收文日期等）\n{supplemental_content[:3000]}\n"
         else:
             supplemental_prompt = ""
-        user_content = truncated + supplemental_prompt
+        user_content = content + supplemental_prompt
 
         # 2026-09-16: 对上游瞬时故障(限流/网关超时/网络抖动)自动重试，避免静默返回空字段
         retryable_status = {429, 500, 502, 503, 504}
