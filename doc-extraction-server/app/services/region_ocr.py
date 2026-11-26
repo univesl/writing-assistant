@@ -13,7 +13,9 @@ from pathlib import Path
 import requests
 
 
-OCR_REGION = tuple(float(x) for x in os.getenv("OCR_TOP_LEFT_REGION", "0,0,0.42,0.18").split(","))
+# 2026-11-26: 区域由 0~42% 扩到 0~85%——收文章的 "Date:YYYY-MM-DD" 打印在页面约 70% 处，
+# 旧区域把它截在外面，导致收文日期从未进入识别（实测市教委公文）。高度略增以覆盖顶部日期行。
+OCR_REGION = tuple(float(x) for x in os.getenv("OCR_TOP_LEFT_REGION", "0,0,0.85,0.20").split(","))
 OCR_RENDER_SCALE = float(os.getenv("OCR_RENDER_SCALE", "3"))
 
 # 2026-11-23: 视觉识别由 qwen 切换为 GLM5.3-Flash（与字段提取同平台的 VLM 能力）
@@ -23,8 +25,9 @@ VLM_MODEL = os.getenv("VLM_MODEL", "")
 VLM_TIMEOUT = float(os.getenv("VLM_TIMEOUT", "60"))
 
 _PROMPT = (
-    "这是公文首页左上角的收文登记章区域截图。请识别图中所有文字"
-    "（如收文机关From、收文单位To、收文编号/字号、收文日期等），"
+    "这是公文首页顶部的收文登记章区域截图。请识别图中所有文字"
+    "（如收文机关From、收文单位To、收文日期 Date 及时间 Time、条码号、收文编号/字号等），"
+    "特别注意右上角的 Date 日期字段必须识别出来，"
     "每行一条纯文本输出，不要markdown格式、不要加说明或注释，"
     "不确定的按最可能的字形输出，不要推测不存在的内容。"
 )

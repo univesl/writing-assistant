@@ -241,14 +241,16 @@ class FieldExtractor:
                         "Content-Type": "application/json"
                     },
                     json={
-                        "model": self.llm_config.get("model", "GLM5.2-FP8_dpQ4saJqACejWnD9"),
+                        "model": self.llm_config.get("model", "GLM5.3-Flash_03KeFFoc1lLZc4s8"),
                         "messages": [
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": user_content}
                         ],
                         "temperature": 0.1,
-                        # GLM5.2-New：思考不占 max_tokens 预算（实测 5.8k 字思考下正文正常）；
-                        # 但 chat_template_kwargs 关思考会导致正文为空——禁止对该模型下发
+                        # GLM5.3-Flash：思考计入 max_tokens 预算，实测长文思考 1k~14k 字。
+                        # 防思考爆的双重保险：①下发关思考参数（可压制大部分，但不保证完全关掉）
+                        # ②预算给到 16000，即使仍有残留思考也装得下，正文不会被挤空
+                        "chat_template_kwargs": {"enable_thinking": False},
                         "max_tokens": 16000,
                         "stream": True
                     },
