@@ -237,11 +237,8 @@ class FieldExtractor:
                             {"role": "user", "content": user_content}
                         ],
                         "temperature": 0.1,
-                        "max_tokens": 4000,
-                        # 2026-11-26: GLM5.3-Flash 的关思考参数在该部署上不完全生效，
-                        # 长文档仍会触发重度思考（实测最高 1.4 万字），与正文共享预算时
-                        # 会耗尽 4000 导致空结果+重试（单请求最长 135s 的根源）。
-                        # 提高预算给思考留足空间（实测长文思考 1k~14k 字均能正常出正文）
+                        # GLM5.2-New：思考不占 max_tokens 预算（实测 5.8k 字思考下正文正常）；
+                        # 但 chat_template_kwargs 关思考会导致正文为空——禁止对该模型下发
                         "max_tokens": 16000,
                         "stream": True
                     },
