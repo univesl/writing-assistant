@@ -1,4 +1,6 @@
 from fastapi import APIRouter, HTTPException, Request, status
+from starlette.concurrency import run_in_threadpool
+import asyncio
 
 from ..schemas import (
     DocumentFileGuardIn,
@@ -85,12 +87,19 @@ async def guard_document_text(request: Request):
     if len(payload) > 30:
         raise HTTPException(status_code=422, detail="最多支持 30 条")
     for key, value in payload.items():
-        if not isinstance(key, str) or not key:
+        if not isinstance(key, str) or not key.strip():
             raise HTTPException(status_code=422, detail="id 必须为非空字符串")
         if len(key) > 64:
             raise HTTPException(status_code=422, detail=f"{key}：id 长度不能超过 64")
-        if not isinstance(value, str) or not value.strip():
+        if not isinstance(value, str):
+            raise HTTPException(status_code=422, detail=f"{key}：文本必须是字符串")
+        if not value.strip():
             raise HTTPException(status_code=422, detail=f"{key}：文本不能为空")
         if len(value) > 5000:
             raise HTTPException(status_code=422, detail=f"{key}：文本长度不能超过 5000")
-    return {key: _review_flat(value) for key, value in payload.items()}
+    # 2026-11-26: 此前在 async 路由里直接同步调用 requests + sleep 重试，会阻塞整个事件循环
+    # （一个文本审查在跑时，全服务冻住，健康检查都卡）。改为丢线程池并发执行，互不阻塞。
+    results = await asyncio.gather(
+        *(run_in_threadpool(_review_flat, value) for value in payload.values())
+    )
+    return dict(zip(payload.keys(), results))
