@@ -238,10 +238,11 @@ class FieldExtractor:
                         ],
                         "temperature": 0.1,
                         "max_tokens": 4000,
-                        # 2026-11-22: 字段提取是结构化任务，关闭深度思考——
-                        # 思考与正文共享 max_tokens 预算，思考偶发超长会耗尽预算导致正文为空
-                        # （"空结果"问题根源）；关闭后实测 4s 出结果（原 26-90s），质量不降
-                        "chat_template_kwargs": {"enable_thinking": False},
+                        # 2026-11-26: GLM5.3-Flash 的关思考参数在该部署上不完全生效，
+                        # 长文档仍会触发重度思考（实测最高 1.4 万字），与正文共享预算时
+                        # 会耗尽 4000 导致空结果+重试（单请求最长 135s 的根源）。
+                        # 提高预算给思考留足空间（实测长文思考 1k~14k 字均能正常出正文）
+                        "max_tokens": 16000,
                         "stream": True
                     },
                     timeout=FIELD_EXTRACTION_TIMEOUT,

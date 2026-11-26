@@ -1,4 +1,5 @@
 from datetime import datetime
+import traceback as _tb
 from pathlib import Path
 import time
 
@@ -68,6 +69,9 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
+    # 记录未处理异常堆栈（此前 500 静默无日志，排障困难）
+    print(f"[500] {request.method} {request.url.path} -> {type(exc).__name__}: {exc}", flush=True)
+    _tb.print_exc()
     return JSONResponse(
         status_code=500,
         content={"detail": "服务器内部错误"},
