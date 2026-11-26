@@ -44,7 +44,13 @@ def extract_from_base64(
     if not is_supported_file(filename):
         raise UnsupportedFileTypeError("不支持的文件类型，请上传 PDF、DOCX、MD 或 TXT 文件")
 
-    file_bytes = base64.b64decode(content_base64)
+    # 2026-11-26: 与 file-guard 对齐——校验 Base64，坏数据返回 422 而非 500
+    try:
+        file_bytes = base64.b64decode(content_base64, validate=True)
+    except (ValueError, base64.binascii.Error) as exc:
+        raise DocumentParseError("文件内容不是有效的 Base64 编码") from exc
+    if not file_bytes:
+        raise DocumentParseError("文件内容为空")
     temp_path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(

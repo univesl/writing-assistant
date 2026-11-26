@@ -32,6 +32,8 @@ def create_document_extraction(request: DocumentExtractionIn):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except DocumentParseError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except UnicodeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post("/file-guard", response_model=DocumentFileGuardOut)
@@ -45,6 +47,8 @@ def guard_document_file(request: DocumentFileGuardIn):
     except UnsupportedFileTypeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except DocumentParseError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except UnicodeError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except DocumentGuardError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
